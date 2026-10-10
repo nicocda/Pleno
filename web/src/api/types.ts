@@ -17,7 +17,21 @@ export interface AuditEntry {
 }
 
 /** Que paso con las fichas disponibles. */
-export type MovementKind = "WelcomeBonus" | "Credit" | "Stake" | "Prize" | "Refund" | "Reversal" | "TransferIn" | "TransferOut" | "Commission";
+export type MovementKind = "WelcomeBonus" | "Credit" | "Stake" | "Prize" | "Refund" | "Reversal" | "TransferIn" | "TransferOut" | "Commission" | "Withdrawal" | "WithdrawalReturned";
+
+export type WithdrawalStatus = "Pending" | "Paid" | "Rejected" | "Cancelled" | "Expired";
+
+/** Un pedido de retiro: las fichas quedan apartadas hasta que lo cobra el cajero (o se cancela, rechaza o vence). */
+export interface Withdrawal {
+  id: string;
+  playerUserId: string;
+  /** Nombre de usuario del jugador: solo lo recibe quien atiende el retiro. */
+  playerName?: string | null;
+  amount: number;
+  status: WithdrawalStatus;
+  createdAt: string;
+  resolvedAt: string | null;
+}
 
 /** Nivel en la jerarquia de cargas (los mismos nombres que los roles). */
 export type HierarchyLevel = "player" | "cashier" | "head_cashier";

@@ -164,6 +164,33 @@ public sealed class WalletAccount
         return new OperationOutcome(transferId, false);
     }
 
+    /// <summary>
+    /// Paga una reserva abierta a otro jugador: las fichas salen de la reserva de esta cuenta y entran a la disponibilidad de <paramref name="toUserId"/>. Es la mitad de salida; la otra
+    /// mitad es <see cref="TransferIn"/> en la cuenta que recibe, en la misma transaccion.
+    /// </summary>
+    public OperationOutcome PayOutReservation(string idempotencyKey, Guid reservationId, Guid toUserId, DateTimeOffset now)
+    {
+        var fingerprint = $"payout|{reservationId:N}|{toUserId:N}";
+        if (TryReplay(idempotencyKey, fingerprint, out var replay))
+        {
+            return replay;
+        }
+
+        if (toUserId == UserId)
+        {
+            throw new WalletDomainException(WalletError.InvalidTransfer, "No se puede pagar una reserva a la misma cuenta.");
+        }
+
+        var stake = RequireOpenReservation(reservationId);
+        var transactionId = NewTransactionId();
+        var entries = LedgerEntries.Balanced(
+            new Entry(LedgerAccountRef.Reserve(UserId), -stake),
+            new Entry(LedgerAccountRef.Player(toUserId), stake));
+
+        Emit(new ReservationPaidOut(transactionId, idempotencyKey, fingerprint, entries, now, reservationId, stake, toUserId));
+        return new OperationOutcome(transactionId, false);
+    }
+
     public OperationOutcome Reserve(string idempotencyKey, Guid reservationId, long stake, DateTimeOffset now, string? gameId = null)
     {
         var fingerprint = $"reserve|{reservationId:N}|{stake}";
@@ -266,7 +293,7 @@ public sealed class WalletAccount
             throw new WalletDomainException(WalletError.AlreadyReversed, "La transaccion ya fue revertida.");
         }
 
-        if (original.Kind == LedgerKind.Transfer)
+        if (original.Kind is LedgerKind.Transfer or LedgerKind.PayOut)
         {
             // La otra mitad vive en otra cuenta: revertir una sola dejaria las fichas desparejas. Se corrige con una transferencia en sentido contrario.
             throw new WalletDomainException(WalletError.ReversalNotAllowed, "Una transferencia no se revierte: se compensa con otra en sentido contrario.");
@@ -404,6 +431,10 @@ public sealed class WalletAccount
                 _openReservations.Remove(released.ReservationId);
                 break;
 
+            case ReservationPaidOut paidOut:
+                _openReservations.Remove(paidOut.ReservationId);
+                break;
+
             case OperationReversed reversal:
                 _reversed.Add(reversal.ReversedTransactionId);
                 ApplyReversalEffects(_ledger[reversal.ReversedTransactionId]);
@@ -429,6 +460,7 @@ public sealed class WalletAccount
     {
         ChipsCredited => new LedgerRecord(ledger.TransactionId, LedgerKind.Credit, ledger.Entries, null, 0),
         ChipsTransferred => new LedgerRecord(ledger.TransactionId, LedgerKind.Transfer, ledger.Entries, null, 0),
+        ReservationPaidOut p => new LedgerRecord(ledger.TransactionId, LedgerKind.PayOut, ledger.Entries, p.ReservationId, p.Stake),
         BetReserved r => new LedgerRecord(ledger.TransactionId, LedgerKind.Reserve, ledger.Entries, r.ReservationId, r.Stake),
         BetSettled s => new LedgerRecord(ledger.TransactionId, LedgerKind.Settle, ledger.Entries, s.ReservationId, s.Stake),
         ReservationReleased r => new LedgerRecord(ledger.TransactionId, LedgerKind.Release, ledger.Entries, r.ReservationId, r.Stake),

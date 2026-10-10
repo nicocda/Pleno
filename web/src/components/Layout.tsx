@@ -75,6 +75,7 @@ export function Layout() {
             <NavLink to="/ruleta">Ruleta</NavLink>
             <NavLink to="/historial">Historial</NavLink>
             <NavLink to="/movimientos">Movimientos</NavLink>
+            <NavLink to="/retirar">Retirar</NavLink>
             {isCashier && <NavLink to="/cajero">Cajero</NavLink>}
             {isAdmin && <NavLink to="/admin">Admin</NavLink>}
           </nav>

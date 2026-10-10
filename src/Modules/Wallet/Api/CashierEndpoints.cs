@@ -70,6 +70,16 @@ internal static class CashierEndpoints
             return Results.Ok(new LoadChipsResponse(result.Outcome.TransactionId, result.Outcome.IsDuplicate, result.Commission));
         });
 
+        // Retiros pendientes de la gente a mi cargo: los cobro (las fichas pasan a mi cuenta) o los rechazo (vuelven al jugador).
+        group.MapGet("/withdrawals", async (HttpContext http, WithdrawalService withdrawals, CancellationToken ct) =>
+            Results.Ok((await withdrawals.ListPendingForAsync(http.User.GetUserId(), ct)).Select(v => WalletEndpoints.ToResponse(v.Request, v.PlayerName))));
+
+        group.MapPost("/withdrawals/{id:guid}/pay", async (Guid id, HttpContext http, WithdrawalService withdrawals, CancellationToken ct) =>
+            Results.Ok(WalletEndpoints.ToResponse((await withdrawals.PayAsync(http.User.GetUserId(), id, ct)))));
+
+        group.MapPost("/withdrawals/{id:guid}/reject", async (Guid id, HttpContext http, WithdrawalService withdrawals, CancellationToken ct) =>
+            Results.Ok(WalletEndpoints.ToResponse((await withdrawals.RejectAsync(http.User.GetUserId(), id, ct)))));
+
         // Mis ultimas cargas.
         group.MapGet("/transfers", async (HttpContext http, BackofficeAudit audit, CashierService cashiers, int? limit, CancellationToken ct) =>
         {

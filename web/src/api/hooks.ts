@@ -1,7 +1,7 @@
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useApi } from "./ApiProvider";
 import { ApiError } from "./client";
-import type { Account, LoadChipsResult, CashierMe, CashierTransfer, HierarchyLevel, HierarchyNode, JurisdictionMember, CreateTableBody, TableCreated, TableRules, TableState, TableSummary, BlackjackBet, BlackjackTable, BlackjackTableState, CrashBet, CrashCashOut, CrashState, GameInfo, SlotsSettings, SlotsSettingsBody, SlotsSettingsHistoryItem, SlotsSettingsPreview, CreditFilter, CreditHistory, MovementsPage, AuditEntry, CreditResult, FairnessInfo, Me, Paytable, PlaceBetBody, PlacedBet, Round, Spin, UserSummary } from "./types";
+import type { Account, Withdrawal, LoadChipsResult, CashierMe, CashierTransfer, HierarchyLevel, HierarchyNode, JurisdictionMember, CreateTableBody, TableCreated, TableRules, TableState, TableSummary, BlackjackBet, BlackjackTable, BlackjackTableState, CrashBet, CrashCashOut, CrashState, GameInfo, SlotsSettings, SlotsSettingsBody, SlotsSettingsHistoryItem, SlotsSettingsPreview, CreditFilter, CreditHistory, MovementsPage, AuditEntry, CreditResult, FairnessInfo, Me, Paytable, PlaceBetBody, PlacedBet, Round, Spin, UserSummary } from "./types";
 
 export const queryKeys = {
   spinsAll: ["spins"] as const,
@@ -33,6 +33,9 @@ export const queryKeys = {
   cashierMe: ["cashier", "me"] as const,
   cashierMembers: ["cashier", "members"] as const,
   cashierTransfers: ["cashier", "transfers"] as const,
+  myWithdrawals: ["withdrawals", "mine"] as const,
+  cashierWithdrawals: ["cashier", "withdrawals"] as const,
+  adminWithdrawals: ["admin", "withdrawals"] as const,
 };
 
 export const BACKOFFICE_ROLE = "backoffice";
@@ -487,4 +490,60 @@ export function useAssignHierarchy() {
       api.put<HierarchyNode>(`/backoffice/wallet/hierarchy/${userId}`, { level, parentUserId }),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: queryKeys.hierarchy }),
   });
+}
+
+// ---- Retiros ----
+
+/** Mis pedidos de retiro. */
+export function useMyWithdrawals() {
+  const api = useApi();
+  return useQuery({ queryKey: queryKeys.myWithdrawals, queryFn: () => api.get<Withdrawal[]>("/wallet/withdrawals"), refetchInterval: 5_000 });
+}
+
+/** Pide retirar: las fichas quedan apartadas hasta que las cobre mi cajero. */
+export function useRequestWithdrawal() {
+  const api = useApi();
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ amount, idempotencyKey }: { amount: number; idempotencyKey: string }) =>
+      api.post<Withdrawal>("/wallet/withdrawals", { amount }, { "Idempotency-Key": idempotencyKey }),
+    onSuccess: () => Promise.all([queryClient.invalidateQueries({ queryKey: queryKeys.myWithdrawals }), queryClient.invalidateQueries({ queryKey: queryKeys.account })]),
+  });
+}
+
+export function useCancelWithdrawal() {
+  const api = useApi();
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => api.post<Withdrawal>(`/wallet/withdrawals/${id}/cancel`),
+    onSettled: () => Promise.all([queryClient.invalidateQueries({ queryKey: queryKeys.myWithdrawals }), queryClient.invalidateQueries({ queryKey: queryKeys.account })]),
+  });
+}
+
+/** Retiros pendientes de la gente a mi cargo (cajero o jefe). */
+export function useCashierWithdrawals(enabled: boolean) {
+  const api = useApi();
+  return useQuery({ queryKey: queryKeys.cashierWithdrawals, queryFn: () => api.get<Withdrawal[]>("/cashier/withdrawals"), enabled, refetchInterval: 5_000 });
+}
+
+/** Cobrar (las fichas pasan a mi cuenta) o rechazar (vuelven al jugador) un retiro. */
+export function useResolveWithdrawal(scope: "cashier" | "backoffice") {
+  const api = useApi();
+  const queryClient = useQueryClient();
+  const base = scope === "cashier" ? "/cashier/withdrawals" : "/backoffice/wallet/withdrawals";
+  return useMutation({
+    mutationFn: ({ id, action }: { id: string; action: "pay" | "reject" }) => api.post<Withdrawal>(`${base}/${id}/${action}`),
+    onSettled: () =>
+      Promise.all([
+        queryClient.invalidateQueries({ queryKey: scope === "cashier" ? queryKeys.cashierWithdrawals : queryKeys.adminWithdrawals }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.account }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.movements }),
+      ]),
+  });
+}
+
+/** Retiros sin cajero (jugador sin cajero o jefe de cajeros): los atiende el backoffice. */
+export function useAdminWithdrawals(enabled: boolean) {
+  const api = useApi();
+  return useQuery({ queryKey: queryKeys.adminWithdrawals, queryFn: () => api.get<Withdrawal[]>("/backoffice/wallet/withdrawals"), enabled, refetchInterval: 5_000 });
 }

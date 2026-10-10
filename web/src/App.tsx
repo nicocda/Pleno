@@ -7,7 +7,9 @@ import { Admin } from "./pages/Admin";
 import { AdminCredits } from "./pages/AdminCredits";
 import { AdminHierarchy } from "./pages/AdminHierarchy";
 import { AdminSlots } from "./pages/AdminSlots";
+import { AdminWithdrawals } from "./pages/AdminWithdrawals";
 import { Cashier } from "./pages/Cashier";
+import { Withdraw } from "./pages/Withdraw";
 import { Movements } from "./pages/Movements";
 import { AuthCallback } from "./pages/AuthCallback";
 import { History } from "./pages/History";
@@ -32,6 +34,8 @@ export function App() {
           <Route path="admin/tragamonedas" element={<AdminSlots />} />
           <Route path="admin/jerarquia" element={<AdminHierarchy />} />
           <Route path="cajero" element={<Cashier />} />
+          <Route path="retirar" element={<Withdraw />} />
+          <Route path="admin/retiros" element={<AdminWithdrawals />} />
           <Route path="movimientos" element={<Movements />} />
         </Route>
         <Route path="*" element={<NotFound />} />

@@ -12,19 +12,74 @@ public sealed partial class WalletService
     /// y la suma de fichas del sistema no cambia. Es idempotente por (cuenta que envia, <paramref name="key"/>): repetir la misma operacion no mueve nada de nuevo.
     /// Quien llama es responsable de haber comprobado que la transferencia esta permitida (jurisdiccion); aca solo se garantiza la contabilidad.
     /// </summary>
-    public async Task<OperationOutcome> TransferAsync(Guid fromUserId, Guid toUserId, string key, long amount, CancellationToken ct = default)
+    public Task<OperationOutcome> TransferAsync(Guid fromUserId, Guid toUserId, string key, long amount, CancellationToken ct = default)
     {
         if (fromUserId == toUserId)
         {
             throw new WalletDomainException(WalletError.InvalidTransfer, "No se pueden transferir fichas a la misma cuenta.");
         }
 
+        var inKey = InKeyFor(fromUserId, key);
+        return BetweenAccountsAsync(
+            fromUserId,
+            toUserId,
+            (from, to, now) =>
+            {
+                var transferId = Guid.CreateVersion7();
+                var outcome = from.TransferOut(key, transferId, toUserId, amount, now);
+                if (!outcome.IsDuplicate)
+                {
+                    to.TransferIn(inKey, transferId, fromUserId, amount, now);
+                }
+
+                return outcome;
+            },
+            ct);
+    }
+
+    /// <summary>
+    /// Paga una reserva abierta de <paramref name="fromUserId"/> a <paramref name="toUserId"/> (el retiro de un jugador que cobra su cajero): las fichas salen de la reserva y entran a la cuenta
+    /// que recibe, en una sola transaccion. Idempotente por (cuenta, <paramref name="key"/>).
+    /// </summary>
+    public Task<OperationOutcome> PayOutReservationAsync(Guid fromUserId, Guid toUserId, Guid reservationId, string key, CancellationToken ct = default)
+    {
+        if (fromUserId == toUserId)
+        {
+            throw new WalletDomainException(WalletError.InvalidTransfer, "No se puede pagar una reserva a la misma cuenta.");
+        }
+
+        var inKey = InKeyFor(fromUserId, key);
+        return BetweenAccountsAsync(
+            fromUserId,
+            toUserId,
+            (from, to, now) =>
+            {
+                var stake = from.OpenReservations.GetValueOrDefault(reservationId); // lo que la reserva tiene, antes de cerrarla
+                var outcome = from.PayOutReservation(key, reservationId, toUserId, now);
+                if (!outcome.IsDuplicate)
+                {
+                    to.TransferIn(inKey, outcome.TransactionId, fromUserId, stake, now);
+                }
+
+                return outcome;
+            },
+            ct);
+    }
+
+    // La mitad de entrada usa su propia clave (derivada) para no chocar con operaciones de la cuenta que recibe que tengan la misma clave.
+    private static string InKeyFor(Guid fromUserId, string key) =>
+        $"in:{Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes($"{fromUserId:N}|{key}")))}";
+
+    /// <summary>
+    /// Carga las dos cuentas, deja que <paramref name="operation"/> decida en cada una y guarda las dos en UNA transaccion (con reintentos por conflicto de version). Las compuertas por cuenta se
+    /// toman siempre en el mismo orden para que dos operaciones cruzadas no se bloqueen entre si. Si la operacion devuelve un duplicado no se escribe nada.
+    /// </summary>
+    private async Task<OperationOutcome> BetweenAccountsAsync(Guid fromUserId, Guid toUserId, Func<WalletAccount, WalletAccount, DateTimeOffset, OperationOutcome> operation, CancellationToken ct)
+    {
         var fromId = PlayerIds.WalletAccountFor(fromUserId);
         var toId = PlayerIds.WalletAccountFor(toUserId);
         var lowGate = Math.Min(GateIndex(fromId), GateIndex(toId));
         var highGate = Math.Max(GateIndex(fromId), GateIndex(toId));
-        // La mitad de entrada usa su propia clave (derivada) para no chocar con operaciones de la cuenta que recibe que tengan la misma clave.
-        var inKey = $"in:{Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes($"{fromUserId:N}|{key}")))}";
 
         for (var attempt = 1; ; attempt++)
         {
@@ -46,14 +101,11 @@ public sealed partial class WalletService
                 var fromVersion = from.Version;
                 var toVersion = to.Version;
 
-                var transferId = Guid.CreateVersion7();
-                var outcome = from.TransferOut(key, transferId, toUserId, amount, clock.GetUtcNow());
+                var outcome = operation(from, to, clock.GetUtcNow());
                 if (outcome.IsDuplicate)
                 {
                     return outcome; // ya se hizo (las dos mitades salen juntas)
                 }
-
-                to.TransferIn(inKey, transferId, fromUserId, amount, clock.GetUtcNow());
 
                 await using var outboxSession = outbox?.Enroll(session);
                 await StageAsync(session, outboxSession, fromId, from, fromVersion);

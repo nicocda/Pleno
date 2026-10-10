@@ -59,7 +59,7 @@ export function Admin() {
         <p className="eyebrow">Administración</p>
         <h1 id="admin-titulo" className="display">Cargar fichas</h1>
         <p className="muted">Elegí un jugador y cargale fichas. Cada carga queda como un asiento en su cuenta.</p>
-        <p className="muted">Otras secciones: <Link to="/admin/tragamonedas">ajustes de la tragamonedas</Link> · <Link to="/admin/cargas">historial de cargas</Link> · <Link to="/admin/jerarquia">cajeros y jerarquía</Link></p>
+        <p className="muted">Otras secciones: <Link to="/admin/tragamonedas">ajustes de la tragamonedas</Link> · <Link to="/admin/cargas">historial de cargas</Link> · <Link to="/admin/jerarquia">cajeros y jerarquía</Link> · <Link to="/admin/retiros">retiros sin cajero</Link></p>
       </section>
 
       <div className="admin-grid">

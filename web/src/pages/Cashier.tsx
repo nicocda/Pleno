@@ -1,5 +1,5 @@
 import { useState, type FormEvent } from "react";
-import { CASHIER_ROLE, HEAD_CASHIER_ROLE, isCashierRole, useCashierMe, useCashierMembers, useCashierTransfers, useLoadChips, useMe } from "../api/hooks";
+import { CASHIER_ROLE, HEAD_CASHIER_ROLE, isCashierRole, useCashierMe, useCashierMembers, useCashierTransfers, useCashierWithdrawals, useLoadChips, useMe, useResolveWithdrawal } from "../api/hooks";
 import type { HierarchyLevel } from "../api/types";
 import { useToasts } from "../components/Toasts";
 import { formatChips, formatDateTime } from "../lib/format";
@@ -23,6 +23,8 @@ export function Cashier() {
   const place = useCashierMe(allowed);
   const members = useCashierMembers(allowed && place.isSuccess);
   const transfers = useCashierTransfers(allowed && place.isSuccess);
+  const withdrawals = useCashierWithdrawals(allowed && place.isSuccess);
+  const resolve = useResolveWithdrawal("cashier");
   const load = useLoadChips();
   const toasts = useToasts();
   const { balance } = useRealtime();
@@ -123,6 +125,28 @@ export function Cashier() {
           )}
         </section>
       </div>
+
+      <section className="card" aria-labelledby="cajero-retiros">
+        <h2 id="cajero-retiros">Retiros pendientes</h2>
+        <p className="muted">Quien quiere retirar aparta sus fichas y vos las cobrás: pasan a tu saldo. Si lo rechazás, le vuelven.</p>
+        {withdrawals.data?.length === 0 && <p className="muted">No hay retiros pendientes.</p>}
+        <ul className="admin-users">
+          {withdrawals.data?.map((w) => (
+            <li key={w.id} className="admin-user">
+              <span className="admin-user__id">{personName(w.playerName, w.playerUserId)}</span>
+              <span>{formatChips(w.amount)} fichas</span>
+              <span className="admin-quick">
+                <button type="button" className="btn btn--gold" disabled={resolve.isPending} onClick={() => resolve.mutate({ id: w.id, action: "pay" }, { onSuccess: () => toasts.show("win", `Cobraste ${formatChips(w.amount)} fichas.`), onError: (e) => toasts.show("error", errorMessage(e)) })}>
+                    Cobrar
+                  </button>
+                <button type="button" className="btn btn--ghost" disabled={resolve.isPending} onClick={() => resolve.mutate({ id: w.id, action: "reject" }, { onSuccess: () => toasts.show("info", "Rechazaste el retiro: las fichas volvieron."), onError: (e) => toasts.show("error", errorMessage(e)) })}>
+                  Rechazar
+                </button>
+              </span>
+            </li>
+          ))}
+        </ul>
+      </section>
 
       <section className="card" aria-labelledby="cajero-historial">
         <h2 id="cajero-historial">Tus últimas cargas</h2>

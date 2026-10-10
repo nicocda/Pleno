@@ -38,6 +38,20 @@ public sealed record ChipsTransferred(
     Guid ToUserId,
     long Amount) : LedgerEvent(TransactionId, IdempotencyKey, Fingerprint, Entries, OccurredAt);
 
+/// <summary>
+/// Una reserva abierta que se paga a otro jugador en vez de volver o quedar para la casa (el retiro: el jugador pone fichas en reserva y su cajero las cobra). Cierra la reserva; el que recibe lo
+/// registra como <see cref="ChipsTransferred"/> en su cuenta, en la misma transaccion.
+/// </summary>
+public sealed record ReservationPaidOut(
+    Guid TransactionId,
+    string IdempotencyKey,
+    string Fingerprint,
+    IReadOnlyList<Entry> Entries,
+    DateTimeOffset OccurredAt,
+    Guid ReservationId,
+    long Stake,
+    Guid ToUserId) : LedgerEvent(TransactionId, IdempotencyKey, Fingerprint, Entries, OccurredAt);
+
 public sealed record BetReserved(
     Guid TransactionId,
     string IdempotencyKey,

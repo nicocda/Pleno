@@ -1,6 +1,6 @@
 # ADR 0014 - Cajeros: jerarquia, cargas por transferencia, comision y cobros
 
-- **Estado:** aceptada (fases A y B implementadas; fase C pendiente)
+- **Estado:** aceptada (fases A, B y C implementadas)
 - **Fecha:** 2026-10-10
 
 ## Contexto
@@ -25,9 +25,15 @@ fichas lleva `IdempotencyKey`, la identidad sale del token y la PII no va a logs
   por carga y 10.000 por dia UTC. El jugador recibe el monto completo; la comision es un movimiento aparte ("Comision por cargas"). **La decision se guarda antes de pagar** (`CommissionRecord`, una por carga): un reintento
   paga exactamente lo mismo y nunca dos veces, aunque entre medio haya cambiado el tope diario. La casa emite fichas, pero acotadas: el backoffice ve el total emitido. Es una carga con tope diario "blando" entre
   instancias (dentro de una instancia se serializa por persona).
-- **Cobro (extraccion): el camino inverso, con el protocolo que ya existe.** El jugador pide retirar: sus fichas se **reservan** (mismo protocolo reservar → resolver → liquidar de los juegos). Su
+- **Cobro (extraccion): el camino inverso, con el protocolo que ya existe** (fase C, implementada: ver el detalle al final de la decision). El jugador pide retirar: sus fichas se **reservan** (mismo protocolo reservar → resolver → liquidar de los juegos). Su
   cajero (o backoffice) **aprueba y paga**; al liquidar se debitan las fichas del jugador y se **transfieren al cajero**, que cierra el ciclo. Si no se aprueba o vence, la reserva se **libera** y las
   fichas vuelven al jugador. La doble aprobacion para montos altos sigue siendo de la fase 5.
+- **Retiros (fase C), como quedo:** el jugador pide retirar (`POST /wallet/withdrawals`, con `Idempotency-Key`, minimo 10) y sus fichas pasan a una **reserva** (`gameId = "withdrawal"`; no se pueden jugar). Lo atiende su **padre en el arbol al pedir**
+  (un jugador → su cajero; un cajero → su jefe; el jefe no tiene padre: ver abajo). Si el padre **cobra**, una nueva operacion de la Wallet, `ReservationPaidOut`, cierra la reserva y las fichas pasan a la cuenta del padre **en una sola transaccion** (la mitad
+  de salida cierra la reserva y la de entrada es un `ChipsTransferred`; no se revierte). Si **rechaza**, el jugador **cancela** o **vence** el plazo (72 h por defecto, `Cashiers:WithdrawalExpiryHours`), la reserva se libera y las fichas vuelven.
+  El estado del pedido (`WithdrawalRequest`) se **deriva de la reserva**: un pedido "pendiente" cuya reserva ya no esta abierta se marca vencido al leerlo, sin necesidad de un mensaje de vuelta. Un cobro y una cancelacion a la vez tienen un solo
+  ganador (el otro recibe 409), porque ambos pasan por la misma reserva. **Quien no tiene cajero** (un jugador suelto, o un **jefe de cajeros**) lo atiende el **backoffice**, que al cobrar devuelve las fichas **a la casa** (liquidacion de la
+  reserva sin premio). Un cajero solo ve y atiende los retiros de **su** gente (403 si no), ni siquiera su jefe.
 - **Por fases, cada una con tests (unitarios + Testcontainers) y su ADR de cierre:** **A** rol, jerarquia, cuenta del cajero y `Transfer`; **B** comision; **C** pedidos de retiro y aprobacion.
 
 ## Consecuencias

@@ -13,6 +13,11 @@ public sealed record CommissionResponse(Guid ActorUserId, Guid TargetUserId, lon
 
 public sealed record CommissionsResponse(IReadOnlyList<CommissionResponse> Items, long TotalPaid);
 
+public sealed record WithdrawalRequestBody(long Amount);
+
+/// <summary><paramref name="PlayerName"/> solo se informa a quien atiende el retiro (y al backoffice); al propio jugador no le hace falta.</summary>
+public sealed record WithdrawalResponse(Guid Id, Guid PlayerUserId, string? PlayerName, long Amount, string Status, DateTimeOffset CreatedAt, DateTimeOffset? ResolvedAt);
+
 public sealed record HierarchyAssignRequest(string? Level, Guid? ParentUserId);
 
 public sealed record HierarchyNodeResponse(Guid UserId, string Level, string? DisplayName, Guid? ParentUserId, DateTimeOffset UpdatedAt);
@@ -58,6 +63,27 @@ internal static class WalletEndpoints
         // Extracto de movimientos: la cuenta sale del token, un jugador solo ve el suyo.
         player.MapGet("/me/movements", async (HttpContext http, WalletService wallet, int? limit, long? before, CancellationToken ct) =>
             Results.Ok(await wallet.GetMovementsAsync(PlayerIds.WalletAccountFor(http.User.GetUserId()), Math.Clamp(limit ?? 30, 1, 100), before, ct)));
+
+        // Retiros: el jugador aparta fichas para que su cajero las cobre. La cuenta sale del token.
+        player.MapPost("/withdrawals", async (HttpContext http, WithdrawalRequestBody body, WithdrawalService withdrawals, CancellationToken ct) =>
+        {
+            var key = http.Request.Headers[IdempotencyHeader].ToString();
+            if (string.IsNullOrWhiteSpace(key))
+            {
+                return Results.Problem(
+                    statusCode: StatusCodes.Status400BadRequest,
+                    title: nameof(WalletError.InvalidIdempotencyKey),
+                    detail: $"El header {IdempotencyHeader} es obligatorio.");
+            }
+
+            return Results.Ok(ToResponse(await withdrawals.RequestAsync(http.User.GetUserId(), body.Amount, key, ct)));
+        });
+
+        player.MapGet("/withdrawals", async (HttpContext http, WithdrawalService withdrawals, int? limit, CancellationToken ct) =>
+            Results.Ok((await withdrawals.ListMineAsync(http.User.GetUserId(), Math.Clamp(limit ?? 20, 1, 100), ct)).Select(w => ToResponse(w))));
+
+        player.MapPost("/withdrawals/{id:guid}/cancel", async (Guid id, HttpContext http, WithdrawalService withdrawals, CancellationToken ct) =>
+            Results.Ok(ToResponse(await withdrawals.CancelAsync(http.User.GetUserId(), id, ct))));
 
         var backoffice = app.MapGroup("/backoffice/wallet").WithTags("Backoffice");
         backoffice.RequireAuthorization(policy => policy.RequireRole(Roles.Backoffice));
@@ -121,6 +147,16 @@ internal static class WalletEndpoints
             return Results.Ok(new HierarchyNodeResponse(node.Id, CashierService.NameOf(node.Level), node.DisplayName, node.ParentUserId, node.UpdatedAt));
         });
 
+        // Retiros sin cajero (jugador sin cajero o jefe de cajeros): los atiende el backoffice; las fichas vuelven a la casa.
+        backoffice.MapGet("/withdrawals", async (WithdrawalService withdrawals, CancellationToken ct) =>
+            Results.Ok((await withdrawals.ListUnassignedAsync(ct)).Select(v => ToResponse(v.Request, v.PlayerName))));
+
+        backoffice.MapPost("/withdrawals/{id:guid}/pay", async (Guid id, HttpContext http, WithdrawalService withdrawals, CancellationToken ct) =>
+            Results.Ok(ToResponse(await withdrawals.PayToHouseAsync(http.User.GetUserId(), id, ct))));
+
+        backoffice.MapPost("/withdrawals/{id:guid}/reject", async (Guid id, HttpContext http, WithdrawalService withdrawals, CancellationToken ct) =>
+            Results.Ok(ToResponse(await withdrawals.RejectUnassignedAsync(http.User.GetUserId(), id, ct))));
+
         // Comisiones que pago la casa (fichas emitidas por incentivo), con el total.
         backoffice.MapGet("/commissions", async (int? limit, CashierService cashiers, CancellationToken ct) =>
         {
@@ -152,6 +188,9 @@ internal static class WalletEndpoints
             : Results.Ok(balance);
     }
 
+    internal static WithdrawalResponse ToResponse(WithdrawalRequest w, string? playerName = null) =>
+        new(w.Id, w.PlayerUserId, playerName, w.Amount, w.Status.ToString(), w.CreatedAt, w.ResolvedAt);
+
     internal static async ValueTask<object?> MapDomainErrors(EndpointFilterInvocationContext context, EndpointFilterDelegate next)
     {
         try
@@ -172,6 +211,8 @@ internal static class WalletEndpoints
             => StatusCodes.Status400BadRequest,
         WalletError.NotInJurisdiction
             => StatusCodes.Status403Forbidden,
+        WalletError.WithdrawalNotFound
+            => StatusCodes.Status404NotFound,
         WalletError.InsufficientFunds
             => StatusCodes.Status422UnprocessableEntity,
         _ => StatusCodes.Status409Conflict,

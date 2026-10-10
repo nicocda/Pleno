@@ -20,6 +20,12 @@ public sealed class CashierOptions
     /// <summary>Tope de lo que una persona cobra de comision por dia (UTC), en fichas.</summary>
     public long MaxCommissionPerDay { get; set; } = 10_000;
 
+    /// <summary>Retiro minimo, en fichas.</summary>
+    public long MinWithdrawal { get; set; } = 10;
+
+    /// <summary>Horas que un retiro puede esperar a que lo atiendan: despues la reserva se libera sola y las fichas vuelven al jugador.</summary>
+    public int WithdrawalExpiryHours { get; set; } = 72;
+
     public static CashierOptions Load(IConfiguration configuration)
     {
         ArgumentNullException.ThrowIfNull(configuration);
@@ -39,6 +45,11 @@ public sealed class CashierOptions
         if (MaxCommissionPerLoad < 0 || MaxCommissionPerDay < 0)
         {
             throw new InvalidOperationException("Cashiers: los topes de comision no pueden ser negativos.");
+        }
+
+        if (MinWithdrawal < 1 || WithdrawalExpiryHours is < 1 or > 24 * 30)
+        {
+            throw new InvalidOperationException("Cashiers: el retiro minimo es de al menos 1 ficha y el plazo va de 1 hora a 30 dias.");
         }
     }
 

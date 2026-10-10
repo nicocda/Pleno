@@ -94,13 +94,16 @@ Dos roles mas ([ADR 0014](adr/0014-cajeros-jerarquia-y-cobros.md)): **`cashier`*
   el nivel del arbol tiene que coincidir con el rol.
 - **Las fichas salen del saldo de quien carga** (transferencia, nunca emision). El backoffice le acredita fichas al jefe (`/backoffice/wallet/users/{id}/credit`); el jefe se las carga a sus cajeros y estos a sus jugadores.
   El jefe solo puede cargar a **sus cajeros** y el cajero solo a **sus jugadores**; cualquier otro destino responde 403.
-- Pantalla del cajero: `/cajero` (aparece en el menu para quien tenga el rol).
+- Pantalla del cajero: `/cajero` (aparece en el menu para quien tenga el rol), con los **retiros pendientes** de su gente (Cobrar / Rechazar).
 - **Comision:** quien carga cobra un porcentaje de lo que carga, **pagado por la casa** (fichas nuevas, acotadas): **2 % para el cajero**, 0 % para el jefe por defecto, con tope por carga (1.000) y por dia UTC (10.000).
   Se configura sin recompilar en la seccion `Cashiers` (`CashierCommissionPermille`, `HeadCashierCommissionPermille`, `MaxCommissionPerLoad`, `MaxCommissionPerDay`). Es hacia abajo (entera) y una carga muy chica puede no pagar nada.
   El jugador recibe **todo** lo cargado; la comision es aparte y aparece en el extracto del cajero como "Comision por cargas". El backoffice ve lo emitido en `GET /backoffice/wallet/commissions`.
 - **Nombres:** el cajero ve el **nombre de usuario** (`preferred_username`) de **su** gente para distinguirla, y de nadie mas. El nombre se guarda solo de quienes estan en el arbol (en su nodo) y se renueva cuando esa persona usa la API; hasta entonces
   se ve el id abreviado. Una carga a alguien que ya no esta a cargo del cajero deja de mostrar su nombre. Es dato personal: no va a logs, trazas ni metricas. Ojo: con el login de Google el nombre de usuario puede ser el email.
 - Cada carga queda en la auditoria (`ChipsTransferred`: quien, a quien, cuanto, cuando; solo ids) y en el extracto de los dos como "Fichas recibidas" / "Fichas enviadas".
+- **Retiros:** cualquier jugador, desde `/retirar`, pide retirar fichas (minimo 10): quedan **apartadas** hasta que su cajero las cobra (pasan a la cuenta del cajero), las rechaza, el jugador cancela o vence el plazo (72 h) y vuelven. Un jugador sin cajero
+  o un jefe de cajeros lo atiende el backoffice en `/admin/retiros` (al cobrar, las fichas vuelven a la casa). Endpoints: `POST|GET /wallet/withdrawals`, `POST /wallet/withdrawals/{id}/cancel`, `GET /cashier/withdrawals`, `POST /cashier/withdrawals/{id}/pay|reject`,
+  `GET /backoffice/wallet/withdrawals`, `POST /backoffice/wallet/withdrawals/{id}/pay|reject`. En el extracto aparecen como "Retiro solicitado" y "Retiro devuelto".
 - **Entorno local ya levantado:** `python scripts/dev-jerarquia.py` ubica a `jefe1` → `cajero1` → `jugador1`/`jugador2` en el arbol y le acredita fichas al jefe (solo desarrollo; reinicia la app antes si es de una version anterior).
 - Para dar el rol a un usuario que ya existe: consola de Keycloak (Users > usuario > Role mapping > `cashier` o `head_cashier`).
 

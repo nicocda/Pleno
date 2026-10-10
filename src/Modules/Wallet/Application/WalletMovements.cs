@@ -32,6 +32,12 @@ public enum MovementKind
 
     /// <summary>Comision que paga la casa por una carga hecha a alguien de tu jurisdiccion.</summary>
     Commission = 9,
+
+    /// <summary>Fichas apartadas para un retiro, a la espera de que las cobre tu cajero.</summary>
+    Withdrawal = 10,
+
+    /// <summary>Fichas de un retiro que volvieron a tu saldo (cancelado, rechazado o vencido).</summary>
+    WithdrawalReturned = 11,
 }
 
 /// <summary>
@@ -88,7 +94,7 @@ public sealed partial class WalletService
                     {
                         var reference = ReferenceOf(ledger);
                         var gameId = reference is { } r && gameByReservation.TryGetValue(r, out var g) ? g : null;
-                        movements.Add(new Movement(stored.Version, ledger.OccurredAt, KindOf(ledger, delta), delta, available, reference, gameId));
+                        movements.Add(new Movement(stored.Version, ledger.OccurredAt, KindOf(ledger, delta, gameId == WithdrawalService.GameId), delta, available, reference, gameId));
                     }
 
                     break;
@@ -100,8 +106,10 @@ public sealed partial class WalletService
         return new MovementsPage(items, older.Count > limit ? items[^1].Version : null);
     }
 
-    private static MovementKind KindOf(LedgerEvent ledger, long delta) => ledger switch
+    private static MovementKind KindOf(LedgerEvent ledger, long delta, bool isWithdrawal) => ledger switch
     {
+        BetReserved when isWithdrawal => MovementKind.Withdrawal,
+        ReservationReleased when isWithdrawal => MovementKind.WithdrawalReturned,
         ChipsTransferred => delta > 0 ? MovementKind.TransferIn : MovementKind.TransferOut,
         ChipsCredited c when c.IdempotencyKey == "welcome-bonus" => MovementKind.WelcomeBonus,
         ChipsCredited c when c.IdempotencyKey.StartsWith("commission:", StringComparison.Ordinal) => MovementKind.Commission,

@@ -99,6 +99,32 @@ describe("Cashier", () => {
     expect(screen.getAllByText("ana").length).toBeGreaterThan(1); // en la lista y en las ultimas cargas
   });
 
+  it("lists the pending withdrawals of their people and collects or rejects them", async () => {
+    const api = fakeApi({
+      "GET /me": () => me(["player", "cashier"]),
+      "GET /wallet/me": () => account,
+      "GET /cashier/me": () => place("cashier"),
+      "GET /cashier/members": () => members,
+      "GET /cashier/transfers": () => [],
+      "GET /cashier/withdrawals": () => [
+        { id: "w1", playerUserId: PLAYER_ID, playerName: "ana", amount: 300, status: "Pending", createdAt: "2026-10-10T10:00:00Z", resolvedAt: null },
+        { id: "w2", playerUserId: "0a1b2c3d-0002-4000-8000-000000000002", playerName: null, amount: 40, status: "Pending", createdAt: "2026-10-10T11:00:00Z", resolvedAt: null },
+      ],
+      "POST /cashier/withdrawals/w1/pay": () => ({ id: "w1", status: "Paid" }),
+      "POST /cashier/withdrawals/w2/reject": () => ({ id: "w2", status: "Rejected" }),
+    });
+    renderApp(<Cashier />, { api });
+
+    expect(await screen.findByText("Retiros pendientes")).toBeInTheDocument();
+    expect(await screen.findByText("300 fichas")).toBeInTheDocument();
+    await userEvent.click(screen.getAllByRole("button", { name: "Cobrar" })[0]!);
+    await waitFor(() => expect(api.calls.some((c) => c.path === "/cashier/withdrawals/w1/pay")).toBe(true));
+    expect(await screen.findByText("Cobraste 300 fichas.")).toBeInTheDocument();
+
+    await userEvent.click(screen.getAllByRole("button", { name: "Rechazar" })[1]!);
+    await waitFor(() => expect(api.calls.some((c) => c.path === "/cashier/withdrawals/w2/reject")).toBe(true));
+  });
+
   it("does not let a cashier load more chips than the balance", async () => {
     const api = fakeApi({
       "GET /me": () => me(["player", "cashier"]),

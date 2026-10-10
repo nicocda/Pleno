@@ -17,6 +17,8 @@ public enum WalletError
     InvalidTransfer,
     NotInJurisdiction,
     InvalidHierarchy,
+    WithdrawalNotFound,
+    WithdrawalNotPending,
 }
 
 public sealed class WalletDomainException(WalletError error, string message) : Exception(message)
