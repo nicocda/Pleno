@@ -3,6 +3,7 @@ import { NavLink, Outlet, useLocation } from "react-router-dom";
 import { BACKOFFICE_ROLE, isCashierRole, useMe } from "../api/hooks";
 import { useAuth } from "../auth/AuthContext";
 import { useRealtime, type ConnectionState } from "../realtime/RealtimeProvider";
+import { usePerf } from "../perf/PerfProvider";
 import { useTheme } from "../theme/ThemeProvider";
 import { BalanceChip } from "./BalanceChip";
 
@@ -17,6 +18,7 @@ export function Layout() {
   const { displayName, logout } = useAuth();
   const { connection } = useRealtime();
   const { theme, toggle } = useTheme();
+  const { choice, setChoice } = usePerf();
   const roles = useMe().data?.roles;
   const isAdmin = roles?.includes(BACKOFFICE_ROLE) ?? false;
   const isCashier = isCashierRole(roles);
@@ -84,6 +86,11 @@ export function Layout() {
             <button type="button" className="icon-btn" onClick={toggle} aria-label={theme === "dark" ? "Cambiar a tema claro" : "Cambiar a tema oscuro"}>
               {theme === "dark" ? "☀" : "☾"}
             </button>
+            <select className="perf-select" value={choice} onChange={(e) => setChoice(e.target.value as typeof choice)} aria-label="Rendimiento">
+              <option value="auto">Rendimiento: auto</option>
+              <option value="full">Rendimiento: completo</option>
+              <option value="lite">Rendimiento: ligero</option>
+            </select>
             <div className="user">
               <span className="user__name">{displayName ?? "Jugador"}</span>
               <button type="button" className="link-btn" onClick={() => void logout()}>

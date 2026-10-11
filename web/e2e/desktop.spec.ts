@@ -136,7 +136,7 @@ test("escritorio: el boton principal queda pegado abajo de la pantalla aunque se
     await page.waitForLoadState("networkidle").catch(() => undefined);
     const button = page.getByRole("button", { name });
     for (const to of [0, 100_000]) {
-      await page.evaluate((y) => window.scrollTo(0, y), to);
+      await page.evaluate(`window.scrollTo(0, ${to})`);
       await expect(button, `${route} con scroll ${to}`).toBeInViewport(fully);
     }
     expect(await scrollable(page), `${route}: la pagina no debe ser mucho mas larga que la pantalla`).toBeLessThan(400);

@@ -8,6 +8,7 @@ import { AuthProvider } from "../auth/AuthContext";
 import type { OidcManager } from "../auth/oidc";
 import { ToastProvider } from "../components/Toasts";
 import { RealtimeProvider, type ConnectionFactory, type HubConnectionLike } from "../realtime/RealtimeProvider";
+import { PerfProvider } from "../perf/PerfProvider";
 import { ThemeProvider } from "../theme/ThemeProvider";
 
 /** Un jugador ya autenticado, con token vigente. */
@@ -134,6 +135,7 @@ export function renderApp(ui: ReactElement, options: AppOptions = {}) {
   const api = options.api ?? fakeApi({});
 
   const view = render(
+    <PerfProvider>
     <ThemeProvider>
       <ToastProvider>
         <AuthProvider manager={oidc}>
@@ -144,7 +146,8 @@ export function renderApp(ui: ReactElement, options: AppOptions = {}) {
           </MemoryRouter>
         </AuthProvider>
       </ToastProvider>
-    </ThemeProvider>,
+    </ThemeProvider>
+    </PerfProvider>,
   );
   return { ...view, hub, api, oidc };
 }
