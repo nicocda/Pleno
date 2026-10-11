@@ -1,6 +1,8 @@
+using Casino.Api;
 using Casino.Hosting;
 using Casino.Modules.Realtime.Api;
 using Casino.Modules.Users.Api;
+using Yarp.ReverseProxy.Forwarder;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -32,6 +34,9 @@ if (allowedOrigins.Length > 0)
 builder.Services.AddReverseProxy()
     .LoadFromConfig(builder.Configuration.GetSection("ReverseProxy"))
     .AddServiceDiscoveryDestinationResolver();
+// Timeout, reintentos de lecturas y circuito por servicio en el cliente con el que el proxy llega a la Wallet y a los juegos.
+builder.Services.AddSingleton(builder.Configuration.GetSection(GatewayResilienceOptions.SectionName).Get<GatewayResilienceOptions>() ?? new GatewayResilienceOptions());
+builder.Services.AddSingleton<IForwarderHttpClientFactory, ResilientForwarderHttpClientFactory>();
 
 builder.Services.AddUsersModule();
 builder.Services.AddRealtimeModule();

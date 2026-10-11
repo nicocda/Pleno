@@ -124,7 +124,7 @@ Seis fases de 1 a 2 semanas cada una; la fase 1 sola ya deja material sólido pa
 ### Fase 4 — Distribuir y endurecer (2 semanas)
 
 - [x] Extraer Wallet y Game Engine como servicios independientes (hecho: Wallet y juegos, cada uno con su base, gateway YARP y pruebas distribuidas; ver ADR 0007 y 0008)
-- [ ] Resiliencia con Polly: reintentos, circuit breaker, timeouts
+- [x] Resiliencia con Polly: reintentos, circuit breaker, timeouts (en el gateway hacia cada servicio, `GatewayResilience.cs`: timeout por intento, reintento solo de lecturas y circuito por servicio; YARP no usa el handler estandar de ServiceDefaults)
 - [ ] Dead-letter queues con alertas
 - [x] Trazas de OpenTelemetry de punta a punta a través de la cola (Wolverine y Marten se exportan como fuentes de traza; `TracePropagationTests` verifica que la petición y el mensaje que dispara en otro servicio comparten traza)
 - [x] Pruebas de carga con k6 y métricas de latencia p95/p99 (`tests/load`, línea base y comparación en `docs/pruebas-de-carga.md`)
