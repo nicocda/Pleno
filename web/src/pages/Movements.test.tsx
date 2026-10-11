@@ -35,6 +35,25 @@ describe("Movements", () => {
     expect(screen.queryByRole("button", { name: /anteriores/ })).not.toBeInTheDocument();
   });
 
+  it("shows the game of a stake or prize, and a dash when there is none", async () => {
+    const page: MovementsPage = {
+      items: [
+        move({ version: 3, kind: "Prize", delta: 250, gameId: "roulette" }),
+        move({ version: 2, kind: "Stake", delta: -100, gameId: "roulette" }),
+        move({ version: 1, kind: "Credit", delta: 500 }),
+      ],
+      nextBefore: null,
+    };
+    const games = [{ id: "roulette", name: "Ruleta europea", tagline: "", route: "/ruleta", glyph: "◎", resolution: "Server" }];
+    renderApp(<Movements />, { api: fakeApi({ "GET /wallet/me": () => account, "GET /wallet/me/movements": () => page, "GET /games": () => games }) });
+
+    await screen.findByRole("table", { name: "Movimientos de saldo" });
+    const [prize, stake, credit] = rows();
+    await waitFor(() => expect(prize).toHaveTextContent("Ruleta europea"));
+    expect(stake).toHaveTextContent("Ruleta europea");
+    expect(credit).toHaveTextContent("—");
+  });
+
   it("colours gains and losses differently", async () => {
     const page: MovementsPage = { items: [move({ version: 2, delta: 50 }), move({ version: 1, kind: "Stake", delta: -20 })], nextBefore: null };
     renderApp(<Movements />, { api: fakeApi({ "GET /wallet/me": () => account, "GET /wallet/me/movements": () => page }) });

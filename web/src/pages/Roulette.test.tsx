@@ -326,3 +326,23 @@ describe("Roulette animation", () => {
     expect(screen.getByTestId("wheel")).toHaveAttribute("data-state", "settled");
   }, 15_000);
 });
+
+describe("Roulette wheel modal", () => {
+  beforeEach(() => reduceMotion(true));
+
+  it("shows the wheel in a modal only while it spins and for a moment after the ball stops", async () => {
+    const { hub } = renderApp(<Roulette />, { api: apiWith() });
+    const modal = screen.getByTestId("wheel-modal");
+    expect(modal).not.toHaveClass("wheel-modal--open"); // oculta mientras se apuesta
+
+    await bet("Pleno 17");
+    await userEvent.click(screen.getByRole("button", { name: /Apostar/ }));
+    expect(modal).toHaveClass("wheel-modal--open"); // aparece al girar
+
+    act(() => hub.emit("roundClosed", closedNotice({ winningNumber: 17, stake: 10, payout: 0 })));
+    await screen.findByText("No hubo suerte esta vez");
+    expect(modal).toHaveClass("wheel-modal--open"); // la bola ya cayo pero se queda un ratito mostrando el numero
+
+    await waitFor(() => expect(modal).not.toHaveClass("wheel-modal--open"), { timeout: 4_000 }); // y se cierra sola
+  }, 10_000);
+});

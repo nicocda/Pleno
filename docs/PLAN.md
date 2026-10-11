@@ -116,17 +116,18 @@ Seis fases de 1 a 2 semanas cada una; la fase 1 sola ya deja material sólido pa
 - [x] Lobby con catálogo de juegos y saldo en vivo
 - [x] Ruleta animada con PixiJS (tapete completo con 157 apuestas, rueda con bola que cae en el número que ya decidió el servidor)
 - [x] Tragamonedas con tabla de pagos configurable (3 rodillos, retorno exacto validado al arrancar, ver ADR 0006)
+- [x] Tragamonedas con cascadas y multiplicador creciente, retorno exacto incluyendo las cascadas (ver ADR 0013)
 - [x] Historial de jugadas y movimientos (jugadas con verificación y extracto de movimientos de saldo derivado del ledger; el admin tiene el historial general de cargas)
 - [ ] Animaciones de premios, sonido y modo oscuro (modo oscuro hecho; faltan animaciones de premios y sonido)
 - [x] Login con Keycloak o Entra External ID (Keycloak)
 
 ### Fase 4 — Distribuir y endurecer (2 semanas)
 
-- [ ] Extraer Wallet y Game Engine como servicios independientes
+- [x] Extraer Wallet y Game Engine como servicios independientes (hecho: Wallet y juegos, cada uno con su base, gateway YARP y pruebas distribuidas; ver ADR 0007 y 0008)
 - [ ] Resiliencia con Polly: reintentos, circuit breaker, timeouts
 - [ ] Dead-letter queues con alertas
 - [ ] Trazas de OpenTelemetry de punta a punta a través de la cola
-- [ ] Pruebas de carga con k6 y métricas de latencia p95/p99
+- [x] Pruebas de carga con k6 y métricas de latencia p95/p99 (`tests/load`, línea base y comparación en `docs/pruebas-de-carga.md`)
 - [ ] Chaos: tirar Game Engine a mitad de apuesta y verificar que el saldo cierra
 - [ ] Cambiar RabbitMQ por Azure Service Bus sin tocar el dominio
 
@@ -134,7 +135,11 @@ Seis fases de 1 a 2 semanas cada una; la fase 1 sola ya deja material sólido pa
 
 - [ ] Agente de juego responsable que analiza eventos y propone límites
 - [ ] Agente de soporte que consulta historial y explica jugadas
-- [ ] Blackjack multijugador en tiempo real
+- [x] Crash: juego en vivo con ronda compartida y provably fair por ronda (ADR 0009, `docs/juego-crash.md`)
+- [x] Blackjack: primer juego de mesas (mesas fijas contra el crupier, varios jugadores por mesa, mazo provably fair; ADR 0011, `docs/juego-blackjack.md`)
+- [x] Plataforma de mesas entre jugadores (mesas de jugador publicas y privadas, bots, turnos, fichas en la Wallet) y Uno como primer juego (ADR 0012, `docs/juegos-mesas.md`, `docs/juego-uno.md`)
+- [x] Truco a dos jugadores sobre la plataforma de mesas (envido, truco, retruco, vale cuatro; `docs/juego-truco.md`)
+- [x] Poker (Texas Hold'em de una mano por mesa) sobre la plataforma de mesas entre jugadores (`docs/juego-poker.md`)
 - [ ] Torneos con leaderboard en Redis
 - [ ] Deploy en Azure Container Apps con Bicep
 - [ ] Backoffice con ajustes manuales y doble aprobación

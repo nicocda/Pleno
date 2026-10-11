@@ -1,9 +1,8 @@
-﻿<Project Sdk="Microsoft.NET.Sdk.Web">
+<Project Sdk="Microsoft.NET.Sdk.Web">
 
   <ItemGroup>
     <ProjectReference Include="..\Casino.ServiceDefaults\Casino.ServiceDefaults.csproj" />
-    <ProjectReference Include="..\Modules\Wallet\Casino.Modules.Wallet.csproj" />
-    <ProjectReference Include="..\Modules\Games\Casino.Modules.Games.csproj" />
+    <ProjectReference Include="..\Casino.Hosting\Casino.Hosting.csproj" />
     <ProjectReference Include="..\Modules\Realtime\Casino.Modules.Realtime.csproj" />
     <ProjectReference Include="..\Modules\Users\Casino.Modules.Users.csproj" />
     <ProjectReference Include="..\Modules\Promotions\Casino.Modules.Promotions.csproj" />
@@ -11,11 +10,9 @@
   </ItemGroup>
 
   <ItemGroup>
-    <PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="10.0.12" />
     <PackageReference Include="Microsoft.AspNetCore.SignalR.StackExchangeRedis" Version="10.0.12" />
-    <PackageReference Include="WolverineFx.Marten" Version="6.48.1" />
-    <PackageReference Include="WolverineFx.RabbitMQ" Version="6.48.1" />
-    <PackageReference Include="WolverineFx.RuntimeCompilation" Version="6.48.1" />
+    <PackageReference Include="Microsoft.Extensions.ServiceDiscovery.Yarp" Version="10.10.0" />
+    <PackageReference Include="Yarp.ReverseProxy" Version="2.3.0" />
   </ItemGroup>
 
   <PropertyGroup>

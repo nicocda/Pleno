@@ -12,7 +12,7 @@ namespace Casino.Integration.Tests.Users;
 [Collection(WalletDbDefinition.Name)]
 public sealed class AuthenticationTests : IDisposable
 {
-    private readonly WebApplicationFactory<Program> _app;
+    private readonly CasinoCluster _app;
 
     public AuthenticationTests(PostgresFixture db)
     {

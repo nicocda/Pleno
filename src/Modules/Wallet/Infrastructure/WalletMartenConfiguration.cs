@@ -27,6 +27,8 @@ public static class WalletMartenConfiguration
         [
             typeof(AccountOpened),
             typeof(ChipsCredited),
+            typeof(ChipsTransferred),
+            typeof(ReservationPaidOut),
             typeof(BetReserved),
             typeof(BetSettled),
             typeof(ReservationReleased),
@@ -36,6 +38,13 @@ public static class WalletMartenConfiguration
         options.Schema.For<IdempotencyRecord>().Identity(r => r.Id);
         options.Schema.For<AuditEntry>().Identity(e => e.Id);
         options.Schema.For<AuditEntry>().Index(e => e.OccurredAt);
+        options.Schema.For<HierarchyNode>().Identity(n => n.Id);
+        options.Schema.For<HierarchyNode>().Index(n => n.ParentUserId);
+        options.Schema.For<CommissionRecord>().Identity(c => c.Id);
+        options.Schema.For<CommissionRecord>().Index(c => c.OccurredAt);
+        options.Schema.For<WithdrawalRequest>().Identity(w => w.Id);
+        options.Schema.For<WithdrawalRequest>().Index(w => w.PlayerUserId);
+        options.Schema.For<WithdrawalRequest>().Index(w => w.ApproverUserId);
     }
 }
 

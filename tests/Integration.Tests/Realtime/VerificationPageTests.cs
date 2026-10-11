@@ -8,7 +8,7 @@ namespace Casino.Integration.Tests.Realtime;
 [Collection(WalletDbDefinition.Name)]
 public sealed class VerificationPageTests : IDisposable
 {
-    private readonly WebApplicationFactory<Program> _app;
+    private readonly CasinoCluster _app;
 
     public VerificationPageTests(PostgresFixture db)
     {

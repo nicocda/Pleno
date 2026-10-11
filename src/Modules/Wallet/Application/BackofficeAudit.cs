@@ -11,6 +11,7 @@ namespace Casino.Modules.Wallet.Application;
 public sealed class BackofficeAudit(IDocumentStore store, TimeProvider clock)
 {
     public const string ChipsCreditedAction = "ChipsCredited";
+    public const string ChipsTransferredAction = "ChipsTransferred";
 
     /// <summary>
     /// Anota una carga de fichas. Es idempotente: la misma carga (misma cuenta y misma clave) se anota una sola vez, asi que se puede
@@ -43,6 +44,49 @@ public sealed class BackofficeAudit(IDocumentStore store, TimeProvider clock)
         {
             // Ya estaba anotada: el original se conserva tal cual.
         }
+    }
+
+    /// <summary>
+    /// Anota una carga de un cajero o jefe a alguien de su jurisdiccion (idempotente, igual que <see cref="RecordCreditAsync"/>). El actor es quien carga y el
+    /// destino quien recibe; solo ids.
+    /// </summary>
+    public async Task RecordTransferAsync(
+        Guid actorUserId, Guid targetUserId, Guid targetAccountId, long amount, string idempotencyKey, Guid transactionId, CancellationToken ct = default)
+    {
+        var entry = new AuditEntry
+        {
+            Id = AuditEntry.BuildId(ChipsTransferredAction, targetAccountId, $"{actorUserId:N}:{idempotencyKey}"),
+            Action = ChipsTransferredAction,
+            ActorUserId = actorUserId,
+            TargetUserId = targetUserId,
+            AccountId = targetAccountId,
+            Amount = amount,
+            IdempotencyKey = idempotencyKey,
+            TransactionId = transactionId,
+            OccurredAt = clock.GetUtcNow(),
+        };
+
+        try
+        {
+            await using var session = store.LightweightSession();
+            session.Insert(entry);
+            await session.SaveChangesAsync(ct);
+        }
+        catch (Exception ex) when (ex is DocumentAlreadyExistsException || ex.InnerException is DocumentAlreadyExistsException)
+        {
+            // Ya estaba anotada.
+        }
+    }
+
+    /// <summary>Las ultimas cargas que hizo <paramref name="actorUserId"/> (un cajero ve solo las suyas), las mas recientes primero.</summary>
+    public async Task<IReadOnlyList<AuditEntry>> ListTransfersByActorAsync(Guid actorUserId, int limit, CancellationToken ct = default)
+    {
+        await using var session = store.QuerySession();
+        return await session.Query<AuditEntry>()
+            .Where(e => e.Action == ChipsTransferredAction && e.ActorUserId == actorUserId)
+            .OrderByDescending(e => e.OccurredAt)
+            .Take(limit)
+            .ToListAsync(ct);
     }
 
     /// <summary>

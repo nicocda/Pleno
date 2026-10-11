@@ -1,32 +1,23 @@
 import { Link } from "react-router-dom";
-import { useAccount, useMe, useRounds } from "../api/hooks";
+import { useAccount, useGames, useMe, useRounds } from "../api/hooks";
 import { BalanceChip } from "../components/BalanceChip";
+import { COMING_SOON, lobbyGames, pageFor } from "../games/registry";
 import { RoundBadge } from "../components/RoundBadge";
 import { formatChips, formatDateTime } from "../lib/format";
 import { describeRound } from "../lib/roulette";
 import { outcomeText } from "../lib/messages";
 import { useRealtime } from "../realtime/RealtimeProvider";
 
-interface GameCard {
-  id: string;
-  name: string;
-  tagline: string;
-  to?: string;
-  glyph: string;
-}
-
-const GAMES: GameCard[] = [
-  { id: "roulette", name: "Ruleta europea", tagline: "37 casilleros, 15 tipos de apuesta. Cada tirada se puede verificar.", to: "/ruleta", glyph: "◎" },
-  { id: "slots", name: "Tragamonedas", tagline: "3 rodillos, premios desde x1 hasta x100 y retorno publicado.", to: "/tragamonedas", glyph: "♣" },
-  { id: "blackjack", name: "Blackjack", tagline: "Mesas multijugador en tiempo real.", glyph: "♠" },
-  { id: "poker", name: "Poker", tagline: "Torneos con tabla de posiciones.", glyph: "♦" },
-];
-
 export function Lobby() {
   const me = useMe();
   const account = useAccount();
   const rounds = useRounds(5);
+  const catalog = useGames();
   const { balance } = useRealtime();
+
+  // Los juegos disponibles salen del catalogo del servidor; los que todavia no existen se muestran como "Proximamente".
+  const available = lobbyGames(catalog.data ?? []);
+  const soon = COMING_SOON.filter((game) => !available.some((a) => a.id === game.id));
 
   return (
     <div className="stack">
@@ -50,15 +41,17 @@ export function Lobby() {
       <section aria-labelledby="juegos">
         <h2 id="juegos" className="section-title">Juegos</h2>
         <div className="games">
-          {GAMES.map((game) =>
-            game.to ? (
-              <Link key={game.id} to={game.to} className="game game--open">
+          {catalog.isLoading && <p className="muted" role="status">Cargando los juegos…</p>}
+          {available.map((game) =>
+            pageFor(game.id) ? (
+              <Link key={game.id} to={game.route} className="game game--open">
                 <span className="game__glyph" aria-hidden="true">{game.glyph}</span>
                 <span className="game__name">{game.name}</span>
                 <span className="game__tag">{game.tagline}</span>
                 <span className="game__cta">Jugar →</span>
               </Link>
             ) : (
+              // El servidor tiene el juego pero este front todavia no sabe como mostrarlo.
               <div key={game.id} className="game game--soon" aria-disabled="true">
                 <span className="game__glyph" aria-hidden="true">{game.glyph}</span>
                 <span className="game__name">{game.name}</span>
@@ -67,6 +60,15 @@ export function Lobby() {
               </div>
             ),
           )}
+          {soon.map((game) => (
+            <div key={game.id} className="game game--soon" aria-disabled="true">
+              <span className="game__glyph" aria-hidden="true">{game.glyph}</span>
+              <span className="game__name">{game.name}</span>
+              <span className="game__tag">{game.tagline}</span>
+              <span className="game__cta">Próximamente</span>
+            </div>
+          ))}
+          {catalog.isError && <p className="notice notice--error" role="alert">No pudimos cargar los juegos.</p>}
         </div>
       </section>
 

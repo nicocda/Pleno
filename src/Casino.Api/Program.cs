@@ -1,14 +1,14 @@
-using Casino.Modules.Games.Api;
+using Casino.Hosting;
 using Casino.Modules.Realtime.Api;
 using Casino.Modules.Users.Api;
-using Casino.Modules.Wallet.Api;
 
 var builder = WebApplication.CreateBuilder(args);
 
 builder.AddServiceDefaults();
 builder.AddCasinoInfrastructure();
-builder.AddCasinoAuthentication();
-builder.Services.ConfigureHttpJsonOptions(options => options.SerializerOptions.Converters.Add(new System.Text.Json.Serialization.JsonStringEnumConverter()));
+// El hub de tiempo real es lo unico que acepta el token en la query (un navegador no puede poner cabeceras en un WebSocket).
+builder.AddCasinoAuthentication(PlayerHub.Path);
+builder.AddCasinoJson();
 
 // SignalR: si hay Redis, es el "backplane" que reparte los avisos entre todas las instancias de la API.
 // Sin el, un aviso generado en una instancia no llegaria a un navegador conectado a otra.
@@ -27,9 +27,13 @@ if (allowedOrigins.Length > 0)
     builder.Services.AddCors(options => options.AddDefaultPolicy(policy => policy.WithOrigins(allowedOrigins).AllowAnyHeader().AllowAnyMethod()));
 }
 
+// Puerta de entrada (gateway): lo que ya no vive en este proceso se reenvia a su servicio. Las rutas y los destinos son configuracion
+// (seccion ReverseProxy); con Aspire, "http://wallet" se resuelve por descubrimiento de servicios. El token viaja tal cual y cada servicio lo valida.
+builder.Services.AddReverseProxy()
+    .LoadFromConfig(builder.Configuration.GetSection("ReverseProxy"))
+    .AddServiceDiscoveryDestinationResolver();
+
 builder.Services.AddUsersModule();
-builder.Services.AddWalletModule();
-builder.Services.AddGamesModule();
 builder.Services.AddRealtimeModule();
 
 var app = builder.Build();
@@ -51,9 +55,8 @@ app.UsePlayerProvisioning();
 
 // Todos los endpoints de negocio exigen un token valido y el rol correspondiente (ver cada modulo).
 app.MapUsersModule();
-app.MapWalletModule();
-app.MapGamesModule();
 app.MapRealtimeModule();
+app.MapReverseProxy();
 
 app.Run();
 

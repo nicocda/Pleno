@@ -30,7 +30,7 @@ public sealed class FairnessServiceTests(PostgresFixture db, ITestOutputHelper o
         var store = DocumentStore.For(options =>
         {
             WalletMartenConfiguration.Configure(options, db.ConnectionString);
-            GamesMartenConfiguration.Register(options);
+            GamesMartenConfiguration.Register(options, []); // la equidad es del nucleo: no necesita ningun juego
             options.AutoCreateSchemaObjects = AutoCreate.None;
         });
         _stores.Add(store);

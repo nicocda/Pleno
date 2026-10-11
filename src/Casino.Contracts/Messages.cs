@@ -6,8 +6,17 @@ namespace Casino.Contracts;
 
 // ---- Ordenes hacia la Wallet ----
 
-/// <summary>Un juego pide reservar las fichas de una apuesta.</summary>
-public sealed record ReserveStake(Guid BetId, Guid AccountId, long Stake);
+/// <summary>
+/// Un juego pide reservar las fichas de una apuesta. <paramref name="TtlSeconds"/> es cuanto puede quedar abierta la reserva antes de liberarse
+/// sola: la mayoria de los juegos resuelve en segundos y usa el plazo por defecto de la Wallet; uno de ronda larga (Crash) pide un plazo mayor.
+/// </summary>
+public sealed record ReserveStake(Guid BetId, Guid AccountId, long Stake, int? TtlSeconds = null, string? GameId = null);
+
+/// <summary>
+/// Un juego en vivo difunde un hecho a TODOS los jugadores conectados (por ejemplo, "se abrio la ronda" o "exploto el cohete").
+/// <paramref name="Data"/> es JSON propio del juego: la plataforma solo lo reenvia, no lo interpreta.
+/// </summary>
+public sealed record GameBroadcast(string Game, string Kind, string Data, DateTimeOffset At);
 
 /// <summary>Un juego informa que la ronda se resolvio. La Wallet liquida con el premio TOTAL (0 si perdio).</summary>
 public sealed record RoundResolved(Guid BetId, Guid AccountId, long Payout);

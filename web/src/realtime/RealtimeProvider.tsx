@@ -2,7 +2,7 @@ import { HubConnectionBuilder, LogLevel } from "@microsoft/signalr";
 import { useQueryClient } from "@tanstack/react-query";
 import { createContext, useCallback, useContext, useEffect, useMemo, useReducer, useRef, useState, type ReactNode } from "react";
 import { queryKeys, useAccount } from "../api/hooks";
-import type { BalanceNotice, RoundClosedNotice } from "../api/types";
+import type { BalanceNotice, GameEvent, RoundClosedNotice } from "../api/types";
 import { useAuth } from "../auth/AuthContext";
 import { config } from "../config";
 import { balanceReducer, initialBalance, type BalanceAction, type BalanceState } from "./balance";
@@ -38,6 +38,8 @@ export interface RealtimeApi {
   connection: ConnectionState;
   /** Se llama cada vez que una ronda termina. Devuelve la funcion para dejar de escuchar. */
   onRoundClosed: (listener: (notice: RoundClosedNotice) => void) => () => void;
+  /** Se llama con cada hecho en vivo de un juego de ronda compartida (por ejemplo Crash). Devuelve la funcion para dejar de escuchar. */
+  onGameEvent: (listener: (event: GameEvent) => void) => () => void;
   /**
    * Congela el saldo que ve el jugador (los avisos y el estado por HTTP se guardan en orden) hasta llamar a la funcion devuelta.
    * Sirve para no adelantar el resultado de una animacion: el saldo cambia recien cuando la bola se detiene.
@@ -66,6 +68,7 @@ export function RealtimeProvider({ children, connectionFactory = defaultConnecti
   }, []);
   const [connection, setConnection] = useState<ConnectionState>("connecting");
   const listeners = useRef(new Set<(notice: RoundClosedNotice) => void>());
+  const gameListeners = useRef(new Set<(event: GameEvent) => void>());
   const { status, getAccessToken } = auth;
 
   // Estado completo por HTTP: es la base. Los avisos en vivo se aplican encima, respetando la version.
@@ -94,6 +97,11 @@ export function RealtimeProvider({ children, connectionFactory = defaultConnecti
       void queryClient.invalidateQueries({ queryKey: queryKeys.roundsAll });
       void queryClient.invalidateQueries({ queryKey: queryKeys.spinsAll });
       void queryClient.invalidateQueries({ queryKey: queryKeys.movements });
+    }) as (payload: never) => void);
+    hub.on("gameEvent", ((event: GameEvent) => {
+      // Cualquier juego de mesas entre jugadores avisa que una mesa cambio (sin cartas): se refrescan su lista y sus mesas abiertas.
+      if (event.kind === "tableChanged") void queryClient.invalidateQueries({ queryKey: queryKeys.tablesOf(event.game) });
+      gameListeners.current.forEach((listener) => listener(event));
     }) as (payload: never) => void);
     hub.onreconnecting(() => !disposed && setConnection("reconnecting"));
     hub.onreconnected(() => {
@@ -126,6 +134,13 @@ export function RealtimeProvider({ children, connectionFactory = defaultConnecti
     };
   }, []);
 
+  const onGameEvent = useCallback((listener: (event: GameEvent) => void) => {
+    gameListeners.current.add(listener);
+    return () => {
+      gameListeners.current.delete(listener);
+    };
+  }, []);
+
   const holdBalance = useCallback(() => {
     held.current += 1;
     let released = false;
@@ -141,7 +156,7 @@ export function RealtimeProvider({ children, connectionFactory = defaultConnecti
     };
   }, []);
 
-  const value = useMemo<RealtimeApi>(() => ({ balance, connection, onRoundClosed, holdBalance }), [balance, connection, onRoundClosed, holdBalance]);
+  const value = useMemo<RealtimeApi>(() => ({ balance, connection, onRoundClosed, onGameEvent, holdBalance }), [balance, connection, onRoundClosed, onGameEvent, holdBalance]);
   return <RealtimeContext.Provider value={value}>{children}</RealtimeContext.Provider>;
 }
 

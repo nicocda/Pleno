@@ -9,7 +9,7 @@ namespace Casino.Integration.Tests.Users;
 public sealed class CorsTests(PostgresFixture db) : IDisposable
 {
     private const string FrontOrigin = "http://localhost:5173";
-    private readonly List<WebApplicationFactory<Program>> _apps = [];
+    private readonly List<CasinoCluster> _apps = [];
 
     public void Dispose()
     {
@@ -19,7 +19,7 @@ public sealed class CorsTests(PostgresFixture db) : IDisposable
         }
     }
 
-    private WebApplicationFactory<Program> StartApp(bool withCors)
+    private CasinoCluster StartApp(bool withCors)
     {
         var app = TestAuth.StartApp(db, customize: builder =>
         {

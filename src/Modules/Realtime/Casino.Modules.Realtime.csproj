@@ -1,6 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <ItemGroup>
+    <PackageReference Include="WolverineFx.Marten" Version="6.48.3" />
     <FrameworkReference Include="Microsoft.AspNetCore.App" />
     <ProjectReference Include="..\..\Casino.Contracts\Casino.Contracts.csproj" />
     <ProjectReference Include="..\..\Casino.BuildingBlocks\Casino.BuildingBlocks.csproj" />

@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Casino.ServiceDefaults\Casino.ServiceDefaults.csproj" />
+    <ProjectReference Include="..\Casino.Hosting\Casino.Hosting.csproj" />
+    <ProjectReference Include="..\Modules\Wallet\Casino.Modules.Wallet.csproj" />
+  </ItemGroup>
+
+</Project>

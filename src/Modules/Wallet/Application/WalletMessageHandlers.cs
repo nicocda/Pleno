@@ -12,11 +12,25 @@ namespace Casino.Modules.Wallet.Application;
 /// <summary>Un juego pide reservar las fichas de una apuesta.</summary>
 public sealed class ReserveStakeHandler(WalletService wallet)
 {
+    /// <summary>Limites del plazo que un juego puede pedir: ni una reserva eterna ni una que venza antes de poder liquidarse.</summary>
+    public const int MinTtlSeconds = 1;
+
+    public const int MaxTtlSeconds = 3_600;
+
     public async Task<StakeRejected?> Handle(ReserveStake command, CancellationToken ct)
     {
         try
         {
-            await wallet.ReserveAsync(command.AccountId, $"reserve:{command.BetId:N}", command.BetId, command.Stake, ct);
+            var key = $"reserve:{command.BetId:N}";
+            if (command.TtlSeconds is { } seconds)
+            {
+                await wallet.ReserveAsync(command.AccountId, key, command.BetId, command.Stake, TimeSpan.FromSeconds(Math.Clamp(seconds, MinTtlSeconds, MaxTtlSeconds)), command.GameId, ct);
+            }
+            else
+            {
+                await wallet.ReserveAsync(command.AccountId, key, command.BetId, command.Stake, command.GameId, ct);
+            }
+
             return null;
         }
         catch (WalletDomainException ex)

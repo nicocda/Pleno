@@ -10,7 +10,7 @@ namespace Casino.Integration.Tests.Games;
 [Collection(WalletDbDefinition.Name)]
 public sealed class FairnessApiTests : IDisposable
 {
-    private readonly WebApplicationFactory<Program> _app;
+    private readonly CasinoCluster _app;
 
     public FairnessApiTests(PostgresFixture db)
     {

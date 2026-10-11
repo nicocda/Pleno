@@ -1,3 +1,4 @@
+using Casino.Modules.Games.Application;
 using Casino.Modules.Games.Roulette;
 
 namespace Casino.Games.Tests;

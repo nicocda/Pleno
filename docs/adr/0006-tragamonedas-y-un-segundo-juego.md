@@ -28,6 +28,16 @@ reservar -> sortear -> liquidar sirven para mas de un juego, antes de separar se
 - **Sin pagina de verificacion propia (por ahora):** el calculo es verificable con la seed revelada y esta probado en el backend,
   pero `/verify` solo sabe de ruleta.
 
+## Ajustes editables desde el panel de administracion
+- La tabla de la configuracion es la **version 0**. El administrador (rol `backoffice`) puede **publicar versiones nuevas** desde `/admin/tragamonedas`:
+  simbolos, pesos, premios, premios por racha y apuesta maxima. Cada version es un documento **solo-agregar** con quien (solo el id) y cuando.
+- **Se prueba antes de guardar:** `POST .../settings/preview` calcula el retorno y la frecuencia de premio sin guardar nada y explica por que una
+  tabla no sirve. Las reglas son las mismas que al arrancar: **el retorno nunca puede superar el 100 %** (con mas, la casa perderia a la larga).
+- **Sin pisar cambios ajenos:** al publicar se envia la version que se estaba mirando; si otra persona publico antes (o a la vez) la respuesta es 409.
+- **Cada giro guarda la version de la tabla** con la que se sorteo, asi se puede recalcular mas adelante aunque la tabla cambie.
+- La tabla vigente se cachea unos segundos por instancia (no se consulta la base en cada giro): un cambio puede tardar ese tiempo en llegar
+  a las demas instancias de la API. Un giro ya colocado se sortea con la tabla vigente al momento de sortear; el tope de apuesta se valida al colocarlo.
+
 ## Consecuencias
 - Un segundo juego costo poco porque el recorrido de dinero y azar esta separado del juego: valida la arquitectura antes de la fase 4.
 - Cada juego repite el mismo esqueleto (servicio, giro/ronda, manejadores). Si aparece un tercero conviene extraer una base comun.

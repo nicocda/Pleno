@@ -12,6 +12,11 @@ public sealed class BalanceChangedHandler(PlayerNotifier notifier)
     public Task Handle(BalanceChanged message, CancellationToken ct) => notifier.BalanceChangedAsync(message, ct);
 }
 
+public sealed class GameBroadcastHandler(PlayerNotifier notifier)
+{
+    public Task Handle(GameBroadcast message, CancellationToken ct) => notifier.GameBroadcastAsync(message, ct);
+}
+
 public sealed class RoundClosedHandler(PlayerNotifier notifier)
 {
     public Task Handle(RoundClosed message, CancellationToken ct) => notifier.RoundClosedAsync(message, ct);

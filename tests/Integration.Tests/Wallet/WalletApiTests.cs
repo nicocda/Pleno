@@ -11,7 +11,7 @@ namespace Casino.Integration.Tests.Wallet;
 [Collection(WalletDbDefinition.Name)]
 public sealed class WalletApiTests : IDisposable
 {
-    private readonly WebApplicationFactory<Program> _app;
+    private readonly CasinoCluster _app;
 
     public WalletApiTests(PostgresFixture db)
     {

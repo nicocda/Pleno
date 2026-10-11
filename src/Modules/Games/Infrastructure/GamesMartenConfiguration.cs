@@ -1,16 +1,16 @@
 using Casino.Modules.Games.Fairness;
-using Casino.Modules.Games.Roulette;
-using Casino.Modules.Games.Slots;
+using Casino.Modules.Games.Platform;
 using Marten;
 
 namespace Casino.Modules.Games.Infrastructure;
 
 public static class GamesMartenConfiguration
 {
-    /// <summary>Registra los tipos del modulo en un store de Marten que comparte el host (la conexion y el esquema los decide quien compone).</summary>
-    public static void Register(StoreOptions options)
+    /// <summary>Registra la equidad (comun a todos los juegos) y el almacenamiento de cada juego habilitado en el store del host.</summary>
+    public static void Register(StoreOptions options, IEnumerable<IGameModule> games)
     {
         ArgumentNullException.ThrowIfNull(options);
+        ArgumentNullException.ThrowIfNull(games);
 
         options.Events.AddEventTypes(
         [
@@ -20,8 +20,9 @@ public static class GamesMartenConfiguration
             typeof(SeedPairRotated),
         ]);
 
-        // Dos manejadores que procesen el mismo mensaje a la vez no pueden pisarse: el segundo falla y reintenta.
-        options.Schema.For<RouletteRound>().Identity(r => r.Id).UseOptimisticConcurrency(true).Index(r => r.UserId);
-        options.Schema.For<SlotsSpin>().Identity(s => s.Id).UseOptimisticConcurrency(true).Index(s => s.UserId);
+        foreach (var game in games)
+        {
+            game.ConfigureStorage(options);
+        }
     }
 }

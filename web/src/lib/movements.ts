@@ -7,6 +7,11 @@ const LABELS: Record<MovementKind, string> = {
   Prize: "Premio cobrado",
   Refund: "Apuesta devuelta",
   Reversal: "Operación revertida",
+  TransferIn: "Fichas recibidas",
+  TransferOut: "Fichas enviadas",
+  Commission: "Comisión por cargas",
+  Withdrawal: "Retiro solicitado",
+  WithdrawalReturned: "Retiro devuelto",
 };
 
 /** Texto del concepto de un movimiento. Si el servidor agrega un tipo nuevo, se muestra tal cual. */

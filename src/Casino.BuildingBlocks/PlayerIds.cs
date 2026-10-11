@@ -24,6 +24,12 @@ public static class Roles
 {
     public const string Player = "player";
     public const string Backoffice = "backoffice";
+
+    /// <summary>Cajero: carga fichas (desde su saldo) a los jugadores de su jurisdiccion. Tambien es jugador.</summary>
+    public const string Cashier = "cashier";
+
+    /// <summary>Jefe de cajeros: carga fichas (desde su saldo) solo a los cajeros de su jurisdiccion. Tambien es jugador.</summary>
+    public const string HeadCashier = "head_cashier";
 }
 
 public static class PrincipalExtensions

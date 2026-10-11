@@ -6,6 +6,7 @@ import { Confetti } from "../components/Confetti";
 import { Pocket } from "../components/Pocket";
 import { useToasts } from "../components/Toasts";
 import { WheelCanvas } from "../components/WheelCanvas";
+import { StakePicker } from "../components/StakePicker";
 import { aggregateChips, totalStake, type ChipDrop, type Spot } from "../lib/board";
 import { formatChips } from "../lib/format";
 import { errorMessage, failureMessage } from "../lib/messages";
@@ -16,6 +17,8 @@ import { WheelModel } from "../lib/wheel";
 import { useRealtime } from "../realtime/RealtimeProvider";
 
 const CHIPS = [1, 10, 50, 100, 500];
+/** Cuanto se queda la rueda a la vista, mostrando el numero, despues de que la bola se detiene. */
+const RESULT_LINGER_MS = 2_000;
 
 const prefersReducedMotion = () =>
   typeof window !== "undefined" && typeof window.matchMedia === "function" && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -58,6 +61,9 @@ export function Roulette() {
   const [result, setResult] = useState<Result | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [winPopup, setWinPopup] = useState<Result | null>(null);
+  // La rueda vive en un modal que solo se ve mientras gira y un ratito despues, con el numero que salio.
+  const [showWheel, setShowWheel] = useState(false);
+  const wheelTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Misma apuesta = misma clave de idempotencia: si la respuesta se pierde y el jugador reintenta, el servidor no cobra dos veces.
   const pending = useRef<{ fingerprint: string; key: string } | null>(null);
@@ -72,6 +78,9 @@ export function Roulette() {
     releaseRef.current = null;
   };
   useEffect(() => release, []);
+  useEffect(() => () => {
+    if (wheelTimer.current) clearTimeout(wheelTimer.current);
+  }, []);
 
   const placed = useMemo(() => aggregateChips(drops), [drops]);
   const stake = totalStake(placed);
@@ -83,15 +92,19 @@ export function Roulette() {
     setWaitingFor(null);
     release(); // recien ahora el saldo se actualiza
     if (closed.status === "Settled") {
-      if (netWin(closed) > 0) {
-        setWinPopup(closed);
-        playWinSound();
-      }
-      else toasts.show("loss", `Salió el ${closed.winningNumber}.`);
-    } else if (closed.status === "Rejected") {
-      toasts.show("error", failureMessage(closed.failureReason));
+      // La rueda se queda un momento mostrando el numero; recien despues se cierra y aparece el aviso (premio o aviso de que no hubo suerte).
+      if (wheelTimer.current) clearTimeout(wheelTimer.current);
+      wheelTimer.current = setTimeout(() => {
+        setShowWheel(false);
+        if (netWin(closed) > 0) {
+          setWinPopup(closed);
+          playWinSound();
+        } else toasts.show("loss", `Salió el ${closed.winningNumber}.`);
+      }, RESULT_LINGER_MS);
     } else {
-      toasts.show("info", "La ronda se anuló y tus fichas volvieron a tu saldo.");
+      setShowWheel(false);
+      if (closed.status === "Rejected") toasts.show("error", failureMessage(closed.failureReason));
+      else toasts.show("info", "La ronda se anuló y tus fichas volvieron a tu saldo.");
     }
   };
 
@@ -175,6 +188,7 @@ export function Roulette() {
     // La rueda empieza a girar ya, sin conocer el resultado, y el saldo se congela hasta que la bola caiga.
     setResult(null);
     setSpinning(true);
+    setShowWheel(true);
     closedRef.current = null;
     landedRef.current = false;
     ballDoneRef.current = false;
@@ -188,6 +202,7 @@ export function Roulette() {
     } catch (e) {
       model.cancel();
       setSpinning(false);
+      setShowWheel(false);
       release();
       setError(errorMessage(e));
       // Error definitivo (la API lo rechazo): proxima apuesta con clave nueva. Si fue de red, se conserva para reintentar sin duplicar.
@@ -208,13 +223,7 @@ export function Roulette() {
       <div className="table-grid">
         <section className="card" aria-labelledby="apuesta">
           <h2 id="apuesta" className="section-title">1. Elegí una ficha y tocá el tapete</h2>
-          <div className="chips" role="radiogroup" aria-label="Valor de la ficha">
-            {CHIPS.map((value) => (
-              <button key={value} type="button" role="radio" aria-checked={chip === value} className={`choice choice--stake ${chip === value ? "choice--on" : ""}`} onClick={() => setChip(value)}>
-                {formatChips(value)}
-              </button>
-            ))}
-          </div>
+          <StakePicker stake={chip} onChange={setChip} chips={CHIPS} min={1} max={Number.MAX_SAFE_INTEGER} allowCustom={false} label="Valor de la ficha" />
 
           <Board placed={placed} disabled={spinning} winning={result?.status === "Settled" ? result.winningNumber : null} onPick={pick} onRemove={unpick} />
 
@@ -246,7 +255,7 @@ export function Roulette() {
           {stake > balance.available && balance.ready && <p className="notice notice--error" role="alert">No te alcanzan las fichas para esa apuesta.</p>}
           {error && <p className="notice notice--error" role="alert">{error}</p>}
 
-          <div className="actions">
+          <div className="actions dock">
             <span className="actions__group">
               <button type="button" className="btn btn--ghost" disabled={drops.length === 0 || spinning} onClick={() => setDrops((current) => current.slice(0, -1))}>
                 Deshacer
@@ -263,7 +272,6 @@ export function Roulette() {
 
         <section className="card result" aria-labelledby="resultado" aria-live="polite">
           <h2 id="resultado" className="section-title">La ruleta</h2>
-          <WheelCanvas model={model} phase={phase} label={wheelLabel} />
           {!spinning && !result && <p className="muted">Tu próxima tirada aparece acá.</p>}
           {spinning && <p role="status">La ruleta está girando…</p>}
           {!spinning && result && <ResultView result={result} />}
@@ -277,6 +285,15 @@ export function Roulette() {
             {recent.data?.every((r) => r.winningNumber === null) && <span className="muted">Sin tiradas todavía.</span>}
           </div>
         </section>
+      </div>
+
+      <div className={`wheel-modal ${showWheel ? "wheel-modal--open" : ""}`} aria-hidden={!showWheel} data-testid="wheel-modal">
+        <div className="wheel-modal__box">
+          <WheelCanvas model={model} phase={phase} label={wheelLabel} />
+          <div className="wheel-modal__result" aria-hidden="true">
+            {phase === "settled" && model.result !== null ? <Pocket number={model.result} size="xl" /> : null}
+          </div>
+        </div>
       </div>
 
       {winPopup && (

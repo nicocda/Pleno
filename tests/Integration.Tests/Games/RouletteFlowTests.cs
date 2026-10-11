@@ -24,7 +24,7 @@ namespace Casino.Integration.Tests.Games;
 [Collection(WalletDbDefinition.Name)]
 public sealed class RouletteFlowTests(PostgresFixture db, RabbitMqFixture rabbit, ITestOutputHelper output) : IDisposable
 {
-    private readonly List<WebApplicationFactory<Program>> _apps = [];
+    private readonly List<CasinoCluster> _apps = [];
 
     public void Dispose()
     {
@@ -35,7 +35,7 @@ public sealed class RouletteFlowTests(PostgresFixture db, RabbitMqFixture rabbit
     }
 
     /// <param name="gamesDown">Simula que el motor de juegos no esta consumiendo: nadie sortea ni responde.</param>
-    private WebApplicationFactory<Program> StartApp(int ttlSeconds = 60, bool gamesDown = false)
+    private CasinoCluster StartApp(int ttlSeconds = 60, bool gamesDown = false)
     {
         var app = TestAuth.StartApp(db, rabbit, customize: builder =>
         {
@@ -52,7 +52,7 @@ public sealed class RouletteFlowTests(PostgresFixture db, RabbitMqFixture rabbit
     }
 
     /// <summary>Un jugador con la cuenta ya abierta y fondeada (sin fichas de bienvenida, para que los saldos sean exactos).</summary>
-    private static async Task<(Guid UserId, Guid AccountId)> FundedPlayerAsync(WebApplicationFactory<Program> app, long chips)
+    private static async Task<(Guid UserId, Guid AccountId)> FundedPlayerAsync(CasinoCluster app, long chips)
     {
         var userId = Guid.NewGuid();
         var wallet = app.Services.GetRequiredService<WalletService>();
@@ -84,10 +84,12 @@ public sealed class RouletteFlowTests(PostgresFixture db, RabbitMqFixture rabbit
         return await response.Content.ReadFromJsonAsync<JsonElement>();
     }
 
-    private static Task<ITrackedSession> TrackPublishAsync(WebApplicationFactory<Program> app, object message)
+    private static Task<ITrackedSession> TrackPublishAsync(CasinoCluster app, object message)
     {
         Func<IMessageContext, Task> publish = async context => await context.PublishAsync(message);
-        return app.Services.GetRequiredService<IHost>().TrackActivity()
+        // Se sigue la actividad de AMBOS servicios (los juegos y la Wallet): el mensaje cruza RabbitMQ entre ellos.
+        return app.Games.Services.GetRequiredService<IHost>().TrackActivity()
+            .AlsoTrack(app.Wallet.Services.GetRequiredService<IHost>())
             .IncludeExternalTransports()
             .Timeout(TimeSpan.FromSeconds(45))
             .ExecuteAndWaitAsync(publish);
@@ -153,6 +155,30 @@ public sealed class RouletteFlowTests(PostgresFixture db, RabbitMqFixture rabbit
             .NextInt(RouletteBet.PocketCount);
         Assert.Equal(winning, recomputed);
         output.WriteLine($"Salio el {winning}; premio {payout}; verificado contra el compromiso {commitment[..16]}...");
+    }
+
+    [Fact]
+    public async Task A_player_who_leaves_right_after_betting_still_gets_the_round_resolved_and_paid_by_the_backend()
+    {
+        using var app = StartApp();
+        var (userId, accountId) = await FundedPlayerAsync(app, 1_000);
+        var wallet = app.Services.GetRequiredService<WalletService>();
+
+        // Apuesta y se va (vuelve al lobby o cierra la pestana) sin esperar el resultado.
+        Guid betId;
+        using (var client = app.ClientFor(userId))
+        {
+            betId = (await PlacedAsync(await PlaceAsync(client, "Red", [], 100, "left-1"))).GetProperty("betId").GetGuid();
+        }
+
+        await WaitUntilAsync(async () => (await wallet.GetAsync(accountId)).Reserved == 0, "las fichas liquidadas sin que el jugador este conectado");
+
+        // Al volver, la ronda ya esta cerrada y el saldo refleja el premio (o la perdida).
+        using var back = app.ClientFor(userId);
+        await WaitForStatusAsync(back, betId, "Settled");
+        var payout = (await RoundAsync(back, betId)).GetProperty("payout").GetInt64();
+        var account = await wallet.GetAsync(accountId);
+        Assert.Equal((1_000 - 100 + payout, 0L), (account.Available, account.Reserved));
     }
 
     [Fact]

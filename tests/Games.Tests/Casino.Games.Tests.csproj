@@ -8,10 +8,10 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="coverlet.collector" Version="6.0.4" />
-    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />
+    <PackageReference Include="coverlet.collector" Version="10.1.0" />
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.10.1" />
     <PackageReference Include="xunit" Version="2.9.3" />
-    <PackageReference Include="xunit.runner.visualstudio" Version="3.1.4" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="4.0.0" />
   </ItemGroup>
 
   <ItemGroup>
@@ -20,6 +20,13 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\Modules\Games\Casino.Modules.Games.csproj" />
+    <ProjectReference Include="..\..\src\Modules\Games.Roulette\Casino.Modules.Games.Roulette.csproj" />
+    <ProjectReference Include="..\..\src\Modules\Games.Slots\Casino.Modules.Games.Slots.csproj" />
+    <ProjectReference Include="..\..\src\Modules\Games.Crash\Casino.Modules.Games.Crash.csproj" />
+    <ProjectReference Include="..\..\src\Modules\Games.Blackjack\Casino.Modules.Games.Blackjack.csproj" />
+    <ProjectReference Include="..\..\src\Modules\Games.Uno\Casino.Modules.Games.Uno.csproj" />
+    <ProjectReference Include="..\..\src\Modules\Games.Truco\Casino.Modules.Games.Truco.csproj" />
+    <ProjectReference Include="..\..\src\Modules\Games.Poker\Casino.Modules.Games.Poker.csproj" />
   </ItemGroup>
 
 </Project>

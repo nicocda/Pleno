@@ -8,7 +8,7 @@
 
   <ItemGroup>
     <PackageReference Include="Marten" Version="9.47.0" />
-    <PackageReference Include="WolverineFx.Marten" Version="6.48.1" />
+    <PackageReference Include="WolverineFx.Marten" Version="6.48.3" />
   </ItemGroup>
 
 </Project>

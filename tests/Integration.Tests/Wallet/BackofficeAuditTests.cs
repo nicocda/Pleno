@@ -12,7 +12,7 @@ namespace Casino.Integration.Tests.Wallet;
 [Collection(WalletDbDefinition.Name)]
 public sealed class BackofficeAuditTests : IDisposable
 {
-    private readonly WebApplicationFactory<Program> _app;
+    private readonly CasinoCluster _app;
 
     public BackofficeAuditTests(PostgresFixture db)
     {

@@ -12,8 +12,15 @@ export default defineConfig({
   reporter: [["list"]],
   use: {
     baseURL: process.env.E2E_BASE_URL ?? "http://localhost:5173",
+    // El front en modo red local (docs/red-local.md) sirve con un certificado de desarrollo: hay que aceptarlo.
+    ignoreHTTPSErrors: true,
     trace: "retain-on-failure",
     screenshot: "only-on-failure",
   },
-  projects: [{ name: "chromium", use: { ...devices["Desktop Chrome"] } }],
+  // Escritorio y celular: las pruebas de UX tienen su propio proyecto: mobile.spec.ts (Pixel 7) y desktop.spec.ts (notebook de 1366 x 768).
+  projects: [
+    { name: "chromium", use: { ...devices["Desktop Chrome"] }, testIgnore: /(mobile|desktop)\.spec\.ts/ },
+    { name: "mobile", use: { ...devices["Pixel 7"] }, testMatch: /mobile\.spec\.ts/ },
+    { name: "desktop", use: { ...devices["Desktop Chrome"], viewport: { width: 1366, height: 768 } }, testMatch: /desktop\.spec\.ts/ },
+  ],
 });

@@ -30,6 +30,9 @@ public static class WalletModule
                 reservationTtl: ttl);
         });
         services.AddSingleton<BackofficeAudit>();
+        services.AddSingleton(sp => CashierOptions.Load(sp.GetRequiredService<IConfiguration>()));
+        services.AddSingleton<CashierService>();
+        services.AddSingleton<WithdrawalService>();
         return services;
     }
 

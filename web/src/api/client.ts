@@ -16,6 +16,8 @@ export class ApiError extends Error {
 export interface ApiClient {
   get<T>(path: string): Promise<T>;
   post<T>(path: string, body?: unknown, headers?: Record<string, string>): Promise<T>;
+  put<T>(path: string, body?: unknown, headers?: Record<string, string>): Promise<T>;
+  delete<T>(path: string): Promise<T>;
 }
 
 export interface ApiClientOptions {
@@ -30,7 +32,7 @@ export function createApiClient({ getToken, onUnauthorized, baseUrl = config.api
   // `fetch` se resuelve en cada llamada (no al crear el cliente) para poder sustituirlo en pruebas.
   const doFetch: typeof fetch = (input, init) => (fetchImpl ?? fetch)(input, init);
 
-  async function request<T>(method: "GET" | "POST", path: string, body?: unknown, extraHeaders?: Record<string, string>): Promise<T> {
+  async function request<T>(method: "GET" | "POST" | "PUT" | "DELETE", path: string, body?: unknown, extraHeaders?: Record<string, string>): Promise<T> {
     const token = await getToken();
     const headers: Record<string, string> = { Accept: "application/json", ...extraHeaders };
     if (token) headers.Authorization = `Bearer ${token}`;
@@ -56,6 +58,8 @@ export function createApiClient({ getToken, onUnauthorized, baseUrl = config.api
   return {
     get: <T>(path: string) => request<T>("GET", path),
     post: <T>(path: string, body?: unknown, headers?: Record<string, string>) => request<T>("POST", path, body, headers),
+    put: <T>(path: string, body?: unknown, headers?: Record<string, string>) => request<T>("PUT", path, body, headers),
+    delete: <T>(path: string) => request<T>("DELETE", path),
   };
 }
 

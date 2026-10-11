@@ -73,8 +73,14 @@ public sealed partial class WalletService(
     public Task<OperationOutcome> CreditAsync(Guid accountId, string key, long amount, CancellationToken ct = default) =>
         ExecuteAsync(accountId, a => a.Credit(key, amount, clock.GetUtcNow()), ct);
 
-    public Task<OperationOutcome> ReserveAsync(Guid accountId, string key, Guid reservationId, long stake, CancellationToken ct = default) =>
-        ExecuteAsync(accountId, a => a.Reserve(key, reservationId, stake, clock.GetUtcNow()), ct);
+    /// <param name="gameId">Juego donde se aposto; solo informativo (se muestra en el extracto).</param>
+    public Task<OperationOutcome> ReserveAsync(Guid accountId, string key, Guid reservationId, long stake, string? gameId = null, CancellationToken ct = default) =>
+        ExecuteAsync(accountId, a => a.Reserve(key, reservationId, stake, clock.GetUtcNow(), gameId), ct);
+
+    /// <param name="ttl">Cuanto puede quedar abierta esta reserva antes de liberarse sola (un juego de ronda larga pide mas que el plazo por defecto).</param>
+    /// <param name="gameId">Juego donde se aposto; solo informativo (se muestra en el extracto).</param>
+    public Task<OperationOutcome> ReserveAsync(Guid accountId, string key, Guid reservationId, long stake, TimeSpan ttl, string? gameId = null, CancellationToken ct = default) =>
+        ExecuteAsync(accountId, a => a.Reserve(key, reservationId, stake, clock.GetUtcNow(), gameId), ct, ttl);
 
     public Task<OperationOutcome> SettleAsync(Guid accountId, string key, Guid reservationId, long payout, CancellationToken ct = default) =>
         ExecuteAsync(accountId, a => a.Settle(key, reservationId, payout, clock.GetUtcNow()), ct);
@@ -123,7 +129,7 @@ public sealed partial class WalletService(
     /// Carga, decide, y guarda con concurrencia optimista. Si otro escribio primero (o la conexion fallo),
     /// recarga y reintenta con la MISMA IdempotencyKey, asi un commit incierto nunca duplica la operacion.
     /// </summary>
-    private async Task<OperationOutcome> ExecuteAsync(Guid accountId, Func<WalletAccount, OperationOutcome> operation, CancellationToken ct)
+    private async Task<OperationOutcome> ExecuteAsync(Guid accountId, Func<WalletAccount, OperationOutcome> operation, CancellationToken ct, TimeSpan? ttl = null)
     {
         for (var attempt = 1; ; attempt++)
         {
@@ -142,45 +148,10 @@ public sealed partial class WalletService(
                     return outcome;
                 }
 
-                var newEvents = account.UncommittedEvents.ToArray<object>();
-                session.Events.Append(accountId, loadedVersion + newEvents.Length, newEvents);
-                foreach (var ledger in account.UncommittedEvents.OfType<LedgerEvent>())
-                {
-                    session.Insert(new IdempotencyRecord
-                    {
-                        Id = IdempotencyRecord.BuildId(accountId, ledger.IdempotencyKey),
-                        AccountId = accountId,
-                        Key = ledger.IdempotencyKey,
-                        TransactionId = ledger.TransactionId,
-                        Fingerprint = ledger.Fingerprint,
-                        RecordedAt = ledger.OccurredAt,
-                    });
-                }
-
-                if (snapshotEvery > 0 && account.Version / snapshotEvery > loadedVersion / snapshotEvery)
-                {
-                    // Mismo commit que los eventos: el snapshot nunca queda adelantado ni atrasado respecto del stream.
-                    session.Store(account.ToSnapshot());
-                }
-
                 // Outbox: los hechos se guardan en la MISMA transaccion que los eventos. Si el commit falla no se publica
                 // nada; si el commit sale bien, el mensaje esta garantizado aunque RabbitMQ este caido en ese momento.
                 await using var outboxSession = outbox?.Enroll(session);
-                if (outboxSession is not null)
-                {
-                    foreach (var message in WalletIntegrationEvents.From(accountId, account.UncommittedEvents, account))
-                    {
-                        await outboxSession.PublishAsync(message);
-                    }
-                    // Compensacion por vencimiento: si nadie liquida la reserva a tiempo, la Wallet la libera sola.
-                    foreach (var reserved in account.UncommittedEvents.OfType<BetReserved>())
-                    {
-                        await outboxSession.PublishAsync(
-                            new ExpireReservation(reserved.ReservationId, accountId),
-                            reservationTtl ?? DefaultReservationTtl);
-                    }
-
-                }
+                await StageAsync(session, outboxSession, accountId, account, loadedVersion, ttl);
 
                 await session.SaveChangesAsync(ct);
                 return outcome;
@@ -200,6 +171,50 @@ public sealed partial class WalletService(
             }
 
             await Task.Delay(retryDelay, ct);
+        }
+    }
+
+    /// <summary>
+    /// Deja listo para guardar lo que hizo una cuenta: sus eventos (con la version esperada), las claves de idempotencia, el snapshot que toque y los
+    /// mensajes del outbox. No hace el commit: lo hace quien llama, asi varias cuentas pueden salir en una sola transaccion.
+    /// </summary>
+    private async Task StageAsync(IDocumentSession session, IOutboxSession? outboxSession, Guid accountId, WalletAccount account, long loadedVersion, TimeSpan? ttl = null)
+    {
+        var newEvents = account.UncommittedEvents.ToArray<object>();
+        session.Events.Append(accountId, loadedVersion + newEvents.Length, newEvents);
+        foreach (var ledger in account.UncommittedEvents.OfType<LedgerEvent>())
+        {
+            session.Insert(new IdempotencyRecord
+            {
+                Id = IdempotencyRecord.BuildId(accountId, ledger.IdempotencyKey),
+                AccountId = accountId,
+                Key = ledger.IdempotencyKey,
+                TransactionId = ledger.TransactionId,
+                Fingerprint = ledger.Fingerprint,
+                RecordedAt = ledger.OccurredAt,
+            });
+        }
+
+        if (snapshotEvery > 0 && account.Version / snapshotEvery > loadedVersion / snapshotEvery)
+        {
+            // Mismo commit que los eventos: el snapshot nunca queda adelantado ni atrasado respecto del stream.
+            session.Store(account.ToSnapshot());
+        }
+
+        if (outboxSession is not null)
+        {
+            foreach (var message in WalletIntegrationEvents.From(accountId, account.UncommittedEvents, account))
+            {
+                await outboxSession.PublishAsync(message);
+            }
+
+            // Compensacion por vencimiento: si nadie liquida la reserva a tiempo, la Wallet la libera sola.
+            foreach (var reserved in account.UncommittedEvents.OfType<BetReserved>())
+            {
+                await outboxSession.PublishAsync(
+                    new ExpireReservation(reserved.ReservationId, accountId),
+                    ttl ?? reservationTtl ?? DefaultReservationTtl);
+            }
         }
     }
 

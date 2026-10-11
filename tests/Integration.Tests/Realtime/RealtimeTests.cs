@@ -20,7 +20,7 @@ namespace Casino.Integration.Tests.Realtime;
 [Collection(WalletDbDefinition.Name)]
 public sealed class RealtimeTests(PostgresFixture db, RabbitMqFixture rabbit, RedisFixture redis, ITestOutputHelper output) : IAsyncLifetime
 {
-    private readonly List<WebApplicationFactory<Program>> _apps = [];
+    private readonly List<CasinoCluster> _apps = [];
     private readonly List<HubConnection> _connections = [];
 
     public Task InitializeAsync() => Task.CompletedTask;
@@ -38,7 +38,7 @@ public sealed class RealtimeTests(PostgresFixture db, RabbitMqFixture rabbit, Re
         }
     }
 
-    private WebApplicationFactory<Program> StartApp(string? redisConnection = null)
+    private CasinoCluster StartApp(string? redisConnection = null)
     {
         var app = TestAuth.StartApp(db, rabbit, redis: redisConnection);
         _apps.Add(app);
@@ -46,7 +46,7 @@ public sealed class RealtimeTests(PostgresFixture db, RabbitMqFixture rabbit, Re
     }
 
     /// <summary>Un cliente SignalR como el del navegador: WebSocket, y el token en la query (?access_token=).</summary>
-    private HubConnection Connect(WebApplicationFactory<Program> app, string? token)
+    private HubConnection Connect(CasinoCluster app, string? token)
     {
         var connection = new HubConnectionBuilder()
             .WithUrl(new Uri(app.Server.BaseAddress, "/hubs/player"), options =>
@@ -97,7 +97,7 @@ public sealed class RealtimeTests(PostgresFixture db, RabbitMqFixture rabbit, Re
         }
     }
 
-    private static async Task<(Guid UserId, Guid AccountId)> FundedPlayerAsync(WebApplicationFactory<Program> app, long chips)
+    private static async Task<(Guid UserId, Guid AccountId)> FundedPlayerAsync(CasinoCluster app, long chips)
     {
         var userId = Guid.NewGuid();
         var wallet = app.Services.GetRequiredService<WalletService>();

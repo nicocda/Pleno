@@ -27,6 +27,8 @@ const paytable: Paytable = {
   totalWeight: 64,
   returnToPlayerPercent: 96.14,
   hitRatePercent: 33.72,
+  cascadeMultipliers: [1, 2, 3, 5, 10],
+  cascadeMinPay: 2,
 };
 
 const spinState = (overrides: Partial<Spin> = {}): Spin => ({
@@ -65,10 +67,15 @@ async function ready() {
   await waitFor(() => expect(screen.getByRole("button", { name: /Girar por/ })).toBeEnabled());
 }
 
+const apiWithspin = (spin: Partial<Spin>) => apiWith({ "GET /games/slots/spins/bet-1": () => spinState(spin) });
+
 const symbolsShown = () => [0, 1, 2].map((i) => screen.getByTestId(`reel-${i}`).getAttribute("data-symbol"));
 
 describe("Slots", () => {
-  beforeEach(() => reduceMotion(true));
+  beforeEach(() => {
+    reduceMotion(true);
+    window.localStorage.setItem("pleno.slots.theme", "clasico"); // estos tests miran los nombres del servidor; el tema Gemas se prueba aparte
+  });
 
   it("shows the public paytable and the theoretical return", async () => {
     renderApp(<Slots />, { api: apiWith() });
@@ -94,10 +101,49 @@ describe("Slots", () => {
     expect(spinCalls(api)[0]!.body).toEqual({ stake: 50 });
     expect(spinCalls(api)[0]!.headers?.["Idempotency-Key"]).toMatch(/^[0-9a-f-]{36}$/);
 
-    expect(await screen.findByRole("dialog", { name: "¡Ganaste!" })).toBeInTheDocument();
+    expect(await screen.findByRole("dialog", { name: "¡GRAN PREMIO!" })).toBeInTheDocument(); // x10
     expect(within(screen.getByRole("dialog")).getByText(/450 fichas/)).toBeInTheDocument(); // ganancia neta: 500 - 50
-    expect(symbolsShown()).toEqual(["Limon", "Limon", "Limon"]);
+    await waitFor(() => expect(symbolsShown()).toEqual(["Limon", "Limon", "Limon"])); // ReelsView copia el modelo en un requestAnimationFrame
     expect(screen.getByTestId("reels")).toHaveAttribute("data-state", "settled");
+  });
+
+  it("plays automatically until stopped, using a different idempotency key per spin", async () => {
+    let n = 0;
+    const api = apiWith({
+      "POST /games/slots/spins": () => placed(`bet-${++n}`),
+      "GET /games/slots/spins/bet-1": () => spinState({ betId: "bet-1" }),
+      "GET /games/slots/spins/bet-2": () => spinState({ betId: "bet-2" }),
+      "GET /games/slots/spins/bet-3": () => spinState({ betId: "bet-3" }),
+    });
+    renderApp(<Slots />, { api });
+    await ready();
+
+    await userEvent.click(screen.getByRole("button", { name: "10 giros" }));
+    await waitFor(() => expect(spinCalls(api).length).toBeGreaterThanOrEqual(2), { timeout: 4000 });
+    await userEvent.click(await screen.findByRole("button", { name: /Detener/ }));
+
+    const keys = spinCalls(api).map((c) => c.headers?.["Idempotency-Key"]);
+    expect(new Set(keys).size).toBe(keys.length);
+    expect(await screen.findByRole("button", { name: "10 giros" })).toBeInTheDocument();
+  });
+
+  it("disables automatic play options the balance cannot cover", async () => {
+    renderApp(<Slots />, { api: apiWith({}, 300) }); // 300 fichas a 10 por giro = 30 giros
+    await ready();
+
+    expect(screen.getByRole("button", { name: "10 giros" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "25 giros" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "50 giros" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "100 giros" })).toBeDisabled();
+    expect(screen.getByText(/te alcanzan para 30 giros/)).toBeInTheDocument();
+  });
+
+  it("explains why automatic play is unavailable when the balance does not reach the minimum", async () => {
+    renderApp(<Slots />, { api: apiWith({}, 50) }); // 5 giros a 10: menos que la opcion minima
+    await waitFor(() => expect(screen.getByRole("button", { name: /Girar por/ })).toBeEnabled());
+
+    expect(screen.getByRole("button", { name: "10 giros" })).toBeDisabled();
+    expect(screen.getByText(/Juego automático no disponible/)).toBeInTheDocument();
   });
 
   it("shows a loss without celebrating", async () => {
@@ -108,7 +154,7 @@ describe("Slots", () => {
 
     expect(await screen.findByText("No hubo suerte esta vez")).toBeInTheDocument();
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
-    expect(symbolsShown()).toEqual(["Limon", "Bar", "Siete"]);
+    await waitFor(() => expect(symbolsShown()).toEqual(["Limon", "Bar", "Siete"])); // ReelsView copia el modelo en un requestAnimationFrame
   });
 
   it("tells the player when a spin only gives the stake back", async () => {
@@ -239,12 +285,15 @@ describe("Slots", () => {
     state = spinState({ reels: ["Siete", "Siete", "Siete"], multiplier: 100, payout: 1000 });
     act(() => hub.emit("roundClosed", { betId: "bet-1", game: "Slots", status: "Settled", winningNumber: null, stake: 10, payout: 1000, failureReason: null }));
 
-    expect(await screen.findByRole("dialog", { name: "¡Ganaste!" }, { timeout: 4_000 })).toBeInTheDocument();
+    expect(await screen.findByRole("dialog", { name: "¡MEGA PREMIO!" }, { timeout: 4_000 })).toBeInTheDocument();
   });
 });
 
 describe("Slots animation", () => {
-  beforeEach(() => reduceMotion(false));
+  beforeEach(() => {
+    reduceMotion(false);
+    window.localStorage.setItem("pleno.slots.theme", "clasico");
+  });
 
   it("does not reveal the result until the last reel has stopped", async () => {
     const api = apiWith({ "GET /games/slots/spins/bet-1": () => spinState({ reels: ["Siete", "Siete", "Siete"], multiplier: 100, payout: 1000 }) });
@@ -259,7 +308,56 @@ describe("Slots animation", () => {
     expect(screen.getByTestId("reels")).toHaveAttribute("data-state", "spinning");
 
     // Cuando frenan, recien ahi aparece.
-    expect(await screen.findByRole("dialog", { name: "¡Ganaste!" }, { timeout: 6_000 })).toBeInTheDocument();
-    expect(symbolsShown()).toEqual(["Siete", "Siete", "Siete"]);
+    expect(await screen.findByRole("dialog", { name: "¡MEGA PREMIO!" }, { timeout: 6_000 })).toBeInTheDocument();
+    await waitFor(() => expect(symbolsShown()).toEqual(["Siete", "Siete", "Siete"])); // ReelsView copia el modelo en un requestAnimationFrame
   }, 12_000);
+
+  it("plays the cascades one by one before revealing the result, ending on the last combination", async () => {
+    const steps = [
+      { reels: ["Cereza", "Cereza", "Bar"], pay: 3, multiplier: 1 },
+      { reels: ["Limon", "Bar", "Bar"], pay: 0, multiplier: 2 },
+    ];
+    const api = apiWithspin({ reels: ["Cereza", "Cereza", "Bar"], steps, multiplier: 3, payout: 30 });
+    renderApp(<Slots />, { api });
+    await ready();
+    await userEvent.click(screen.getByRole("button", { name: /Girar por/ }));
+
+    // Mientras explota y cae lo nuevo aparece el multiplicador de la cascada y todavia no hay resultado.
+    expect(await screen.findByTestId("cascade-badge", {}, { timeout: 8_000 })).toHaveTextContent("x2");
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    await waitFor(() => expect(symbolsShown()).toEqual(["Limon", "Bar", "Bar"]));
+
+    expect(await screen.findByRole("dialog", { name: "¡Ganaste!" }, { timeout: 5_000 })).toHaveTextContent("1 cascada encadenadas");
+    expect(symbolsShown()).toEqual(["Limon", "Bar", "Bar"]); // se queda la combinacion final, no vuelve a la inicial
+  }, 20_000);
+});
+
+describe("Slots themes", () => {
+  beforeEach(() => reduceMotion(true));
+
+  it("draws the symbols as gems by default and lets the player go back to the classic style", async () => {
+    renderApp(<Slots />, { api: apiWith() });
+    await ready();
+
+    expect(screen.getByTestId("reels")).toHaveClass("reels--gemas");
+    expect(screen.getByTestId("reel-0").querySelector("svg.gem")).not.toBeNull();
+    expect(screen.getByRole("radio", { name: "Gemas" })).toBeChecked();
+    expect(screen.getByLabelText("Premios")).toHaveTextContent("Tres Diamante"); // el lector de pantalla oye el nombre de la gema
+
+    await userEvent.click(screen.getByRole("radio", { name: "Clásico" }));
+
+    expect(screen.getByTestId("reels")).toHaveClass("reels--clasico");
+    expect(screen.getByTestId("reel-0").querySelector("svg.gem")).toBeNull();
+    expect(window.localStorage.getItem("pleno.slots.theme")).toBe("clasico"); // y se acuerda la proxima vez
+  });
+
+  it("celebrates according to the size of the prize", async () => {
+    const api = apiWith({ "GET /games/slots/spins/bet-1": () => spinState({ stake: 10, reels: ["Cereza", "Cereza", "Cereza"], multiplier: 7, payout: 70 }) });
+    renderApp(<Slots />, { api });
+    await ready();
+    await userEvent.click(screen.getByRole("button", { name: /Girar por/ }));
+
+    expect(await screen.findByRole("dialog", { name: "¡Ganaste!" })).toHaveClass("win-modal--win");
+    expect(screen.getByRole("dialog")).toHaveTextContent("60 fichas"); // ganancia neta: 70 - 10
+  });
 });

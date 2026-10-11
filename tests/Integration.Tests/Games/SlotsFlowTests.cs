@@ -17,7 +17,7 @@ namespace Casino.Integration.Tests.Games;
 [Collection(WalletDbDefinition.Name)]
 public sealed class SlotsFlowTests(PostgresFixture db, RabbitMqFixture rabbit) : IDisposable
 {
-    private readonly List<WebApplicationFactory<Program>> _apps = [];
+    private readonly List<CasinoCluster> _apps = [];
 
     public void Dispose()
     {
@@ -27,14 +27,14 @@ public sealed class SlotsFlowTests(PostgresFixture db, RabbitMqFixture rabbit) :
         }
     }
 
-    private WebApplicationFactory<Program> StartApp()
+    private CasinoCluster StartApp()
     {
         var app = TestAuth.StartApp(db, rabbit);
         _apps.Add(app);
         return app;
     }
 
-    private static async Task<(Guid UserId, Guid AccountId)> FundedPlayerAsync(WebApplicationFactory<Program> app, long chips)
+    private static async Task<(Guid UserId, Guid AccountId)> FundedPlayerAsync(CasinoCluster app, long chips)
     {
         var userId = Guid.NewGuid();
         var wallet = app.Services.GetRequiredService<WalletService>();
@@ -115,6 +115,35 @@ public sealed class SlotsFlowTests(PostgresFixture db, RabbitMqFixture rabbit) :
     }
 
     [Fact]
+    public async Task A_player_who_leaves_right_after_spinning_still_gets_the_spin_resolved_and_paid_by_the_backend()
+    {
+        using var app = StartApp();
+        var (userId, accountId) = await FundedPlayerAsync(app, 1_000);
+        var wallet = app.Services.GetRequiredService<WalletService>();
+
+        // El jugador gira y se va (cierra la pestana, vuelve al lobby): el cliente deja de existir sin esperar el resultado.
+        Guid betId;
+        using (var client = app.ClientFor(userId))
+        {
+            betId = (await AcceptedAsync(await SpinAsync(client, 100, "left-1"))).GetProperty("betId").GetGuid();
+        }
+
+        // Las fichas se descontaron al apostar y el backend cierra solo: el saldo termina en 1.000 - 100 + premio, sin nada reservado.
+        var deadline = DateTime.UtcNow.AddSeconds(90);
+        while (DateTime.UtcNow < deadline && (await wallet.GetAsync(accountId)).Reserved != 0)
+        {
+            await Task.Delay(300);
+        }
+
+        // Cuando vuelve, la jugada ya esta resuelta y el premio (si hubo) esta en su saldo.
+        using var back = app.ClientFor(userId);
+        await WaitForStatusAsync(back, betId, "Settled");
+        var payout = (await SpinStateAsync(back, betId)).GetProperty("payout").GetInt64();
+        var account = await wallet.GetAsync(accountId);
+        Assert.Equal((1_000 - 100 + payout, 0L), (account.Available, account.Reserved));
+    }
+
+    [Fact]
     public async Task Insufficient_funds_reject_the_spin_and_nothing_is_taken()
     {
         using var app = StartApp();
@@ -177,7 +206,7 @@ public sealed class SlotsFlowTests(PostgresFixture db, RabbitMqFixture rabbit) :
         var table = await client.GetFromJsonAsync<JsonElement>("/games/slots/paytable");
         Assert.Equal(3, table.GetProperty("reels").GetInt32());
         Assert.Equal(6, table.GetProperty("symbols").GetArrayLength());
-        Assert.InRange(table.GetProperty("returnToPlayerPercent").GetDouble(), 96.0, 96.3);
+        Assert.InRange(table.GetProperty("returnToPlayerPercent").GetDouble(), 96.3, 96.9);
 
         var placed = await AcceptedAsync(await SpinAsync(client, 10, "mine"));
         var betId = placed.GetProperty("betId").GetGuid();

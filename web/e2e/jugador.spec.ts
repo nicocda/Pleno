@@ -53,6 +53,10 @@ test("un jugador entra, apuesta, ve el resultado en vivo y lo verifica", async (
   // El saldo en vivo se movió sin recargar la página: -10 si perdió, +10 neto si gano (paga x2 e incluye la apuesta).
   await expect.poll(() => readBalance(page), { timeout: 15_000 }).toBe(won > 0 ? before + 10 : before - 10);
 
+  // Si gano, el aviso de victoria tapa la pagina: se cierra para seguir (antes el test fallaba la mitad de las veces, justo cuando ganaba).
+  const dialog = page.getByRole("dialog", { name: "¡Ganaste!" });
+  if (await dialog.isVisible().catch(() => false)) await page.getByRole("button", { name: "Continuar", exact: true }).click({ timeout: 5_000 });
+
   // Historial: la jugada aparece cobrada.
   await page.getByRole("link", { name: "Historial" }).click();
   await expect(page.getByText("Cobrada").first()).toBeVisible();

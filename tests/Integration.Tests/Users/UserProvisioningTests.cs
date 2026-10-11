@@ -15,7 +15,7 @@ namespace Casino.Integration.Tests.Users;
 public sealed class UserProvisioningTests(PostgresFixture db, RabbitMqFixture rabbit) : IDisposable
 {
     private const long Welcome = 1_000;
-    private readonly List<WebApplicationFactory<Program>> _apps = [];
+    private readonly List<CasinoCluster> _apps = [];
 
     public void Dispose()
     {
@@ -25,7 +25,7 @@ public sealed class UserProvisioningTests(PostgresFixture db, RabbitMqFixture ra
         }
     }
 
-    private WebApplicationFactory<Program> StartApp()
+    private CasinoCluster StartApp()
     {
         var app = TestAuth.StartApp(db, rabbit, welcomeChips: (int)Welcome);
         _apps.Add(app);
@@ -57,7 +57,7 @@ public sealed class UserProvisioningTests(PostgresFixture db, RabbitMqFixture ra
 
     private async Task<long> ProfileRowsAsync(Guid userId)
     {
-        await using var conn = new NpgsqlConnection(db.ConnectionString);
+        await using var conn = new NpgsqlConnection(db.UsersDbConnectionString);
         await conn.OpenAsync();
         await using var cmd = new NpgsqlCommand("SELECT count(*) FROM casino.mt_doc_userprofile WHERE id = @id", conn);
         cmd.Parameters.AddWithValue("id", userId);
@@ -127,7 +127,7 @@ public sealed class UserProvisioningTests(PostgresFixture db, RabbitMqFixture ra
         using var client = app.ClientFor(userId);
         await client.GetAsync("/me"); // el token trae un nombre de usuario; no debe terminar en nuestra base
 
-        await using var conn = new NpgsqlConnection(db.ConnectionString);
+        await using var conn = new NpgsqlConnection(db.UsersDbConnectionString);
         await conn.OpenAsync();
         await using var cmd = new NpgsqlCommand("SELECT data::text FROM casino.mt_doc_userprofile WHERE id = @id", conn);
         cmd.Parameters.AddWithValue("id", userId);

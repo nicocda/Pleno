@@ -11,9 +11,11 @@ export interface ReelsTimings {
   staggerMs: number;
   /** Cada cuanto cambia el simbolo que se ve en un rodillo que gira. */
   cycleMs: number;
+  /** Suspenso extra del ultimo rodillo cuando los anteriores ya salieron iguales (casi-premio): frena mucho mas lento. */
+  tensionMs: number;
 }
 
-export const DEFAULT_REEL_TIMINGS: ReelsTimings = { minSpinMs: 1_100, staggerMs: 450, cycleMs: 70 };
+export const DEFAULT_REEL_TIMINGS: ReelsTimings = { minSpinMs: 1_100, staggerMs: 450, cycleMs: 70, tensionMs: 1_100 };
 
 export class ReelsModel {
   phase: ReelsPhase = "idle";
@@ -75,6 +77,25 @@ export class ReelsModel {
     this.stopped.fill(true);
   }
 
+  /** Los rodillos anteriores ya frenaron en el mismo simbolo y el ultimo todavia gira: momento de suspenso. */
+  get anticipating(): boolean {
+    const last = this.reelCount - 1;
+    return this.phase === "spinning" && this.pending !== null && this.leadingMatch() && !this.stopped[last] && this.stopped.slice(0, last).every(Boolean);
+  }
+
+  /** Cuando frena el rodillo `i` (ms desde que empezo el giro), segun el resultado que ya se conoce. */
+  private stopAt(i: number): number {
+    const tense = i === this.reelCount - 1 && this.leadingMatch();
+    return this.timings.minSpinMs + i * this.timings.staggerMs + (tense ? this.timings.tensionMs : 0);
+  }
+
+  /** Todos los rodillos menos el ultimo salieron en el mismo simbolo (hace falta mas de un rodillo anterior para que haya suspenso). */
+  private leadingMatch(): boolean {
+    const result = this.pending;
+    if (!result || this.reelCount < 3) return false;
+    return result.slice(0, -1).every((s) => s === result[0]);
+  }
+
   update(deltaMs: number): void {
     if (this.phase !== "spinning") return;
     this.elapsed += deltaMs;
@@ -85,7 +106,7 @@ export class ReelsModel {
 
     for (let i = 0; i < this.reelCount; i++) {
       if (this.stopped[i]) continue;
-      if (this.pending && this.elapsed >= this.timings.minSpinMs + i * this.timings.staggerMs) {
+      if (this.pending && this.elapsed >= this.stopAt(i)) {
         this.display[i] = this.pending[i]!;
         this.stopped[i] = true;
       } else {

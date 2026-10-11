@@ -161,3 +161,32 @@ describe("ReelsModel", () => {
     expect(() => new ReelsModel(1)).toThrow(RangeError);
   });
 });
+
+describe("ReelsModel near miss", () => {
+  const run = (result: number[], untilMs: number) => {
+    const model = new ReelsModel(6, 3);
+    model.spin();
+    model.land(result);
+    const step = 50;
+    for (let t = 0; t < untilMs; t += step) model.update(step);
+    return model;
+  };
+
+  it("holds the last reel back, with suspense, when the first two came out the same", () => {
+    const tense = run([2, 2, 4], 2_000); // sin suspenso ya habrian frenado (1100 + 2 * 450 = 2000 ms)
+
+    expect(tense.stopped).toEqual([true, true, false]);
+    expect(tense.anticipating).toBe(true);
+
+    const done = run([2, 2, 4], 3_200);
+    expect(done.phase).toBe("settled");
+    expect(done.anticipating).toBe(false);
+  });
+
+  it("does not add suspense when the first two differ", () => {
+    const plain = run([2, 3, 4], 2_100);
+
+    expect(plain.phase).toBe("settled");
+    expect(plain.anticipating).toBe(false);
+  });
+});

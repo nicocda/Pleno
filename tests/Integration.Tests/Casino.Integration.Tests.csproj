@@ -8,17 +8,17 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="coverlet.collector" Version="6.0.4" />
+    <PackageReference Include="coverlet.collector" Version="10.1.0" />
     <PackageReference Include="Microsoft.AspNetCore.Mvc.Testing" Version="10.0.12" />
     <PackageReference Include="Microsoft.AspNetCore.SignalR.Client" Version="10.0.12" />
     <PackageReference Include="Microsoft.Extensions.TimeProvider.Testing" Version="10.10.0" />
-    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.10.1" />
     <PackageReference Include="Npgsql" Version="10.0.3" />
-    <PackageReference Include="Testcontainers.PostgreSql" Version="4.15.0" />
-    <PackageReference Include="Testcontainers.RabbitMq" Version="4.15.0" />
-    <PackageReference Include="Testcontainers.Redis" Version="4.15.0" />
+    <PackageReference Include="Testcontainers.PostgreSql" Version="4.16.0" />
+    <PackageReference Include="Testcontainers.RabbitMq" Version="4.16.0" />
+    <PackageReference Include="Testcontainers.Redis" Version="4.16.0" />
     <PackageReference Include="xunit" Version="2.9.3" />
-    <PackageReference Include="xunit.runner.visualstudio" Version="3.1.4" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="4.0.0" />
   </ItemGroup>
 
   <ItemGroup>
@@ -28,7 +28,11 @@
   <ItemGroup>
     <ProjectReference Include="..\..\src\Modules\Wallet\Casino.Modules.Wallet.csproj" />
     <ProjectReference Include="..\..\src\Casino.Api\Casino.Api.csproj" />
+    <ProjectReference Include="..\..\src\Casino.WalletService\Casino.WalletService.csproj" />
     <ProjectReference Include="..\..\src\Modules\Games\Casino.Modules.Games.csproj" />
+    <ProjectReference Include="..\..\src\Modules\Games.Roulette\Casino.Modules.Games.Roulette.csproj" />
+    <ProjectReference Include="..\..\src\Modules\Games.Slots\Casino.Modules.Games.Slots.csproj" />
+    <ProjectReference Include="..\..\src\Casino.GamesService\Casino.GamesService.csproj" />
     <ProjectReference Include="..\..\src\Casino.Contracts\Casino.Contracts.csproj" />
   </ItemGroup>
 

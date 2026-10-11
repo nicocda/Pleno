@@ -20,7 +20,7 @@ public sealed class KeycloakIntegrationTests(PostgresFixture db, KeycloakFixture
     private static readonly Guid Jugador1 = Guid.Parse("0a1b2c3d-0001-4000-8000-000000000001");
     private static readonly Guid Backoffice1 = Guid.Parse("0a1b2c3d-0003-4000-8000-000000000003");
 
-    private WebApplicationFactory<Program> _app = null!;
+    private CasinoCluster _app = null!;
 
     public async Task InitializeAsync()
     {

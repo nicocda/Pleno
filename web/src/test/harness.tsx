@@ -8,6 +8,7 @@ import { AuthProvider } from "../auth/AuthContext";
 import type { OidcManager } from "../auth/oidc";
 import { ToastProvider } from "../components/Toasts";
 import { RealtimeProvider, type ConnectionFactory, type HubConnectionLike } from "../realtime/RealtimeProvider";
+import { PerfProvider } from "../perf/PerfProvider";
 import { ThemeProvider } from "../theme/ThemeProvider";
 
 /** Un jugador ya autenticado, con token vigente. */
@@ -55,13 +56,13 @@ export function fakeOidc(user: User | null = fakeUser()): FakeOidc {
 type Handler = (body?: unknown, headers?: Record<string, string>) => unknown;
 
 export interface FakeApi extends ApiClient {
-  calls: { method: "GET" | "POST"; path: string; body?: unknown; headers?: Record<string, string> }[];
+  calls: { method: "GET" | "POST" | "PUT" | "DELETE"; path: string; body?: unknown; headers?: Record<string, string> }[];
 }
 
 /** API simulada: cada ruta es una funcion que devuelve el cuerpo o lanza un ApiError. Lo no declarado responde 404. */
 export function fakeApi(routes: Record<string, Handler>): FakeApi {
   const calls: FakeApi["calls"] = [];
-  const respond = async <T,>(method: "GET" | "POST", path: string, body?: unknown, headers?: Record<string, string>): Promise<T> => {
+  const respond = async <T,>(method: "GET" | "POST" | "PUT" | "DELETE", path: string, body?: unknown, headers?: Record<string, string>): Promise<T> => {
     calls.push({ method, path, body, headers });
     const handler = routes[`${method} ${path.split("?")[0]}`];
     if (!handler) throw new ApiError(404, "NotFound");
@@ -71,6 +72,8 @@ export function fakeApi(routes: Record<string, Handler>): FakeApi {
     calls,
     get: <T,>(path: string) => respond<T>("GET", path),
     post: <T,>(path: string, body?: unknown, headers?: Record<string, string>) => respond<T>("POST", path, body, headers),
+    put: <T,>(path: string, body?: unknown, headers?: Record<string, string>) => respond<T>("PUT", path, body, headers),
+    delete: <T,>(path: string) => respond<T>("DELETE", path),
   };
 }
 
@@ -132,6 +135,7 @@ export function renderApp(ui: ReactElement, options: AppOptions = {}) {
   const api = options.api ?? fakeApi({});
 
   const view = render(
+    <PerfProvider>
     <ThemeProvider>
       <ToastProvider>
         <AuthProvider manager={oidc}>
@@ -142,7 +146,8 @@ export function renderApp(ui: ReactElement, options: AppOptions = {}) {
           </MemoryRouter>
         </AuthProvider>
       </ToastProvider>
-    </ThemeProvider>,
+    </ThemeProvider>
+    </PerfProvider>,
   );
   return { ...view, hub, api, oidc };
 }

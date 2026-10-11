@@ -1,8 +1,8 @@
-import { useAuth } from "../auth/AuthContext";
+import { useLogin } from "../auth/useLogin";
 
 /** Pantalla para quien todavia no inicio sesion. */
 export function Landing() {
-  const { login } = useAuth();
+  const { start, pending, error } = useLogin("/");
 
   return (
     <main className="landing">
@@ -17,9 +17,11 @@ export function Landing() {
           <li><strong>Saldo exacto.</strong> Cada ficha queda registrada y se puede auditar.</li>
         </ul>
 
-        <button type="button" className="btn btn--gold btn--lg" onClick={() => void login("/")}>
-          Entrar o crear cuenta
+        <button type="button" className="btn btn--gold btn--lg" onClick={() => void start()} disabled={pending} aria-busy={pending}>
+          {pending ? "Conectando…" : "Entrar o crear cuenta"}
         </button>
+        {pending && <p className="landing__fine" role="status">Conectando con el servidor de identidad…</p>}
+        {error && <p className="landing__error" role="alert">{error}</p>}
         <p className="landing__fine">Iniciar sesión te lleva a nuestro servidor de identidad (Keycloak). Tu contraseña nunca pasa por esta aplicación.</p>
       </div>
     </main>

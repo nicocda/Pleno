@@ -25,15 +25,19 @@ public sealed class WalletMessagingTests(PostgresFixture db, RabbitMqFixture rab
     private const string StakeEvents = "wallet.stake-events";
     private const string BalanceEvents = "wallet.balance-events";
 
-    private WebApplicationFactory<Program> _factory = null!;
-    private IHost _host = null!;
+    private CasinoCluster _factory = null!;
+    private IHost _host = null!; // el servicio de juegos: desde aca se publican las ordenes a la Wallet
+    private IHost _walletHost = null!;
+    private IHost _apiHost = null!; // consume los cambios de saldo (tiempo real)
     private WalletService _wallet = null!;
 
     public Task InitializeAsync()
     {
         _factory = TestAuth.StartApp(db, rabbit);
-        _host = _factory.Services.GetRequiredService<IHost>();
-        _wallet = _factory.Services.GetRequiredService<WalletService>();
+        _host = _factory.Games.Services.GetRequiredService<IHost>();
+        _walletHost = _factory.Wallet.Services.GetRequiredService<IHost>();
+        _apiHost = _factory.Api.Services.GetRequiredService<IHost>();
+        _wallet = _factory.Wallet.Services.GetRequiredService<WalletService>();
         return Task.CompletedTask;
     }
 
@@ -47,7 +51,9 @@ public sealed class WalletMessagingTests(PostgresFixture db, RabbitMqFixture rab
     }
 
     private Task<ITrackedSession> TrackAsync(Func<IMessageBus, Task> action) =>
+        // Se sigue la actividad de TODOS los servicios que participan: el mensaje sale de uno, viaja por RabbitMQ y lo procesan los otros.
         _host.TrackActivity()
+            .AlsoTrack(_walletHost, _apiHost)
             .IncludeExternalTransports()
             .Timeout(TimeSpan.FromSeconds(45))
             .ExecuteAndWaitAsync(action);
@@ -57,7 +63,7 @@ public sealed class WalletMessagingTests(PostgresFixture db, RabbitMqFixture rab
 
     private async Task<long> PendingOutgoingAsync()
     {
-        await using var conn = new NpgsqlConnection(db.ConnectionString);
+        await using var conn = new NpgsqlConnection(db.WalletDbConnectionString);
         await conn.OpenAsync();
         await using var find = new NpgsqlCommand(
             "SELECT table_schema FROM information_schema.tables WHERE table_name = 'wolverine_outgoing_envelopes' LIMIT 1", conn);
@@ -159,8 +165,8 @@ public sealed class WalletMessagingTests(PostgresFixture db, RabbitMqFixture rab
         // Muchos intentos chocan por la version del stream y se revierten: sus mensajes NO deben salir.
         // Si alguno saliera, habria mas StakeReserved que reservas reales.
         var accountId = await FundedAccountAsync(500);
-        var store = _factory.Services.GetRequiredService<IDocumentStore>();
-        var outbox = _factory.Services.GetRequiredService<IOutboxFactory>();
+        var store = _factory.Wallet.Services.GetRequiredService<IDocumentStore>();
+        var outbox = _factory.Wallet.Services.GetRequiredService<IOutboxFactory>();
         var instances = new[]
         {
             new WalletService(store, TimeProvider.System, outbox: outbox),

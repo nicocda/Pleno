@@ -23,13 +23,29 @@ public enum MovementKind
 
     /// <summary>Una operacion anterior se revirtio.</summary>
     Reversal = 6,
+
+    /// <summary>Fichas recibidas de otro jugador (la carga de un cajero, por ejemplo).</summary>
+    TransferIn = 7,
+
+    /// <summary>Fichas enviadas a otro jugador.</summary>
+    TransferOut = 8,
+
+    /// <summary>Comision que paga la casa por una carga hecha a alguien de tu jurisdiccion.</summary>
+    Commission = 9,
+
+    /// <summary>Fichas apartadas para un retiro, a la espera de que las cobre tu cajero.</summary>
+    Withdrawal = 10,
+
+    /// <summary>Fichas de un retiro que volvieron a tu saldo (cancelado, rechazado o vencido).</summary>
+    WithdrawalReturned = 11,
 }
 
 /// <summary>
 /// Un movimiento del saldo disponible. <paramref name="Delta"/> es con signo (negativo = salen fichas) y
 /// <paramref name="BalanceAfter"/> es lo disponible justo despues. <paramref name="Version"/> ordena y sirve de cursor.
+/// <paramref name="GameId"/> es el juego de una apuesta, su premio o su devolucion (null si no aplica o la apuesta es anterior a que se guardara).
 /// </summary>
-public sealed record Movement(long Version, DateTimeOffset At, MovementKind Kind, long Delta, long BalanceAfter, Guid? Reference);
+public sealed record Movement(long Version, DateTimeOffset At, MovementKind Kind, long Delta, long BalanceAfter, Guid? Reference, string? GameId = null);
 
 /// <summary>Una pagina de movimientos, de los mas recientes a los mas viejos. <paramref name="NextBefore"/> es el cursor de la pagina siguiente (null si no hay mas).</summary>
 public sealed record MovementsPage(IReadOnlyList<Movement> Items, long? NextBefore);
@@ -55,6 +71,7 @@ public sealed partial class WalletService
         var movements = new List<Movement>();
         Guid userId = Guid.Empty;
         long available = 0;
+        var gameByReservation = new Dictionary<Guid, string>();
         foreach (var stored in stream)
         {
             switch (stored.Data)
@@ -68,9 +85,16 @@ public sealed partial class WalletService
                         .Where(e => e.Account == LedgerAccountRef.Player(userId))
                         .Sum(e => e.Amount);
                     available += delta;
+                    if (ledger is BetReserved { GameId: { } game } reserved)
+                    {
+                        gameByReservation[reserved.ReservationId] = game;
+                    }
+
                     if (delta != 0)
                     {
-                        movements.Add(new Movement(stored.Version, ledger.OccurredAt, KindOf(ledger), delta, available, ReferenceOf(ledger)));
+                        var reference = ReferenceOf(ledger);
+                        var gameId = reference is { } r && gameByReservation.TryGetValue(r, out var g) ? g : null;
+                        movements.Add(new Movement(stored.Version, ledger.OccurredAt, KindOf(ledger, delta, gameId == WithdrawalService.GameId), delta, available, reference, gameId));
                     }
 
                     break;
@@ -82,9 +106,13 @@ public sealed partial class WalletService
         return new MovementsPage(items, older.Count > limit ? items[^1].Version : null);
     }
 
-    private static MovementKind KindOf(LedgerEvent ledger) => ledger switch
+    private static MovementKind KindOf(LedgerEvent ledger, long delta, bool isWithdrawal) => ledger switch
     {
+        BetReserved when isWithdrawal => MovementKind.Withdrawal,
+        ReservationReleased when isWithdrawal => MovementKind.WithdrawalReturned,
+        ChipsTransferred => delta > 0 ? MovementKind.TransferIn : MovementKind.TransferOut,
         ChipsCredited c when c.IdempotencyKey == "welcome-bonus" => MovementKind.WelcomeBonus,
+        ChipsCredited c when c.IdempotencyKey.StartsWith("commission:", StringComparison.Ordinal) => MovementKind.Commission,
         ChipsCredited => MovementKind.Credit,
         BetReserved => MovementKind.Stake,
         BetSettled => MovementKind.Prize,

@@ -517,3 +517,9 @@ Thumbs.db
 web/test-results/
 web/playwright-report/
 web/blob-report/
+
+# Resultados crudos de las pruebas de carga (k6)
+tests/load/results/*.json
+
+# Lista personal de mejoras (solo local, no se sube)
+docs/mejoras.md

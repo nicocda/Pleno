@@ -1,4 +1,4 @@
-import { useMovements } from "../api/hooks";
+import { useGames, useMovements } from "../api/hooks";
 import { BalanceChip } from "../components/BalanceChip";
 import { formatChips, formatDateTime } from "../lib/format";
 import { errorMessage } from "../lib/messages";
@@ -8,6 +8,9 @@ import { movementLabel, signedChips } from "../lib/movements";
 export function Movements() {
   const movements = useMovements();
   const items = movements.data?.pages.flatMap((page) => page.items) ?? [];
+  const games = useGames();
+  // Si el catalogo no esta (todavia o fallo), se muestra el identificador tal cual: mejor eso que dejar la celda vacia.
+  const gameName = (id: string | null | undefined) => (id ? (games.data?.find((g) => g.id === id)?.name ?? id) : "—");
 
   return (
     <div className="stack">
@@ -35,13 +38,14 @@ export function Movements() {
           <div className="admin-audit-scroll">
             <table className="admin-audit" aria-label="Movimientos de saldo">
               <thead>
-                <tr><th>Cuándo</th><th>Concepto</th><th className="num">Fichas</th><th className="num">Saldo</th></tr>
+                <tr><th>Cuándo</th><th>Concepto</th><th>Juego</th><th className="num">Fichas</th><th className="num">Saldo</th></tr>
               </thead>
               <tbody>
                 {items.map((m) => (
                   <tr key={m.version}>
                     <td>{formatDateTime(m.at)}</td>
                     <td>{movementLabel(m.kind)}</td>
+                    <td>{gameName(m.gameId)}</td>
                     <td className={`num ${m.delta > 0 ? "delta--up" : "delta--down"}`}>{signedChips(m.delta, formatChips)}</td>
                     <td className="num">{formatChips(m.balanceAfter)}</td>
                   </tr>

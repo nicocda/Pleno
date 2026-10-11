@@ -15,7 +15,7 @@ namespace Casino.Integration.Tests.Wallet;
 [Collection(WalletDbDefinition.Name)]
 public sealed class MovementsAndCreditsTests : IDisposable
 {
-    private readonly WebApplicationFactory<Program> _app;
+    private readonly CasinoCluster _app;
 
     public MovementsAndCreditsTests(PostgresFixture db)
     {
@@ -77,6 +77,26 @@ public sealed class MovementsAndCreditsTests : IDisposable
         Assert.Equal((await Wallet.GetAsync(accountId)).Available, page.Items[0].BalanceAfter);
         Assert.Equal(bet1, page.Items.Single(m => m.Kind == MovementKind.Prize).Reference);
         Assert.Equal(userId, (await Wallet.GetAsync(accountId)).UserId);
+    }
+
+    [Fact]
+    public async Task A_stake_its_prize_and_its_refund_carry_the_game_where_it_was_bet()
+    {
+        var (_, accountId) = await PlayerAsync();
+        var won = Guid.NewGuid();
+        var cancelled = Guid.NewGuid();
+        await Wallet.CreditAsync(accountId, "welcome-bonus", 1_000);
+        await Wallet.ReserveAsync(accountId, "r1", won, 100, gameId: "roulette");
+        await Wallet.SettleAsync(accountId, "s1", won, 250);
+        await Wallet.ReserveAsync(accountId, "r2", cancelled, 50, gameId: "slots");
+        await Wallet.ReleaseAsync(accountId, "x2", cancelled);
+        await Wallet.ReserveAsync(accountId, "r3", Guid.NewGuid(), 10); // sin juego (apuesta anterior a que se guardara)
+
+        var page = await Wallet.GetMovementsAsync(accountId, 50, before: null);
+
+        Assert.Equal(
+            [(MovementKind.Stake, (string?)null), (MovementKind.Refund, "slots"), (MovementKind.Stake, "slots"), (MovementKind.Prize, "roulette"), (MovementKind.Stake, "roulette"), (MovementKind.WelcomeBonus, null)],
+            page.Items.Select(m => (m.Kind, m.GameId)));
     }
 
     [Fact]

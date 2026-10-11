@@ -4,11 +4,38 @@
     <Project Path="src/Casino.AppHost/Casino.AppHost.csproj" />
     <Project Path="src/Casino.BuildingBlocks/Casino.BuildingBlocks.csproj" />
     <Project Path="src/Casino.Contracts/Casino.Contracts.csproj" />
+    <Project Path="src/Casino.GamesService/Casino.GamesService.csproj" />
+    <Project Path="src/Casino.Hosting/Casino.Hosting.csproj" />
     <Project Path="src/Casino.ServiceDefaults/Casino.ServiceDefaults.csproj" />
+    <Project Path="src/Casino.WalletService/Casino.WalletService.csproj" />
   </Folder>
   <Folder Name="/src/Modules/" />
   <Folder Name="/src/Modules/Games/">
     <Project Path="src/Modules/Games/Casino.Modules.Games.csproj" />
+  </Folder>
+  <Folder Name="/src/Modules/Games.Roulette/">
+    <Project Path="src/Modules/Games.Roulette/Casino.Modules.Games.Roulette.csproj" />
+  </Folder>
+  <Folder Name="/src/Modules/Games.Blackjack/">
+    <Project Path="src/Modules/Games.Blackjack/Casino.Modules.Games.Blackjack.csproj" />
+  </Folder>
+  <Folder Name="/src/Modules/Games.Tables/">
+    <Project Path="src/Modules/Games.Tables/Casino.Modules.Games.Tables.csproj" />
+  </Folder>
+  <Folder Name="/src/Modules/Games.Poker/">
+    <Project Path="src/Modules/Games.Poker/Casino.Modules.Games.Poker.csproj" />
+  </Folder>
+  <Folder Name="/src/Modules/Games.Truco/">
+    <Project Path="src/Modules/Games.Truco/Casino.Modules.Games.Truco.csproj" />
+  </Folder>
+  <Folder Name="/src/Modules/Games.Uno/">
+    <Project Path="src/Modules/Games.Uno/Casino.Modules.Games.Uno.csproj" />
+  </Folder>
+  <Folder Name="/src/Modules/Games.Crash/">
+    <Project Path="src/Modules/Games.Crash/Casino.Modules.Games.Crash.csproj" />
+  </Folder>
+  <Folder Name="/src/Modules/Games.Slots/">
+    <Project Path="src/Modules/Games.Slots/Casino.Modules.Games.Slots.csproj" />
   </Folder>
   <Folder Name="/src/Modules/Promotions/">
     <Project Path="src/Modules/Promotions/Casino.Modules.Promotions.csproj" />

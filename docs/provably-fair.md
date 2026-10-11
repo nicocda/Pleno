@@ -86,5 +86,5 @@ El ultimo vector consume mas de 32 bytes, asi que cubre el cambio de `cursor`.
 - Un par cerrado ya tiene su server seed revelada: sus jugadas se pueden verificar con datos publicos.
 
 ```
-dotnet user-secrets set "Fairness:MasterKey" "<32 bytes aleatorios en base64>" --project src/Casino.Api
+dotnet user-secrets set "Fairness:MasterKey" "<32 bytes aleatorios en base64>" --project src/Casino.GamesService
 ```
