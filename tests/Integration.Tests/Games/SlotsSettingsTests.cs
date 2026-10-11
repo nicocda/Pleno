@@ -42,7 +42,7 @@ public sealed class SlotsSettingsTests(PostgresFixture db, RabbitMqFixture rabbi
 
     private static readonly string[] NewSymbols = ["A", "B"];
 
-    private static readonly object[] Fair = Symbols(("A", 3, 1), ("B", 1, 3)); // retorno 46,9 %
+    private static readonly object[] Fair = Symbols(("A", 3, 1), ("B", 1, 3)); // retorno 48,4 % (46,9 % sin cascadas)
 
     private static Task<HttpResponseMessage> PutAsync(HttpClient client, object body) => client.PostAsJsonAsync("/backoffice/games/slots/settings", body);
 
@@ -60,7 +60,7 @@ public sealed class SlotsSettingsTests(PostgresFixture db, RabbitMqFixture rabbi
         // pero la de la configuracion (version 0) siempre esta disponible para volver a ella.
         Assert.True(settings.GetProperty("version").GetInt32() >= 0);
         Assert.Equal(6, settings.GetProperty("baseline").GetProperty("symbols").GetArrayLength());
-        Assert.InRange(settings.GetProperty("baseline").GetProperty("returnToPlayerPercent").GetDouble(), 96.0, 96.3);
+        Assert.InRange(settings.GetProperty("baseline").GetProperty("returnToPlayerPercent").GetDouble(), 96.3, 96.9);
         Assert.Equal(10_000, settings.GetProperty("baseline").GetProperty("maxStake").GetInt64());
     }
 
@@ -89,7 +89,7 @@ public sealed class SlotsSettingsTests(PostgresFixture db, RabbitMqFixture rabbi
         var greedy = await JsonAsync(await admin.PostAsJsonAsync("/backoffice/games/slots/settings/preview", Body(Symbols(("A", 1, 50), ("B", 1, 50)))));
 
         Assert.True(good.GetProperty("valid").GetBoolean());
-        Assert.InRange(good.GetProperty("returnToPlayerPercent").GetDouble(), 46.8, 47.0); // (27 * 1 + 1 * 3) / 64
+        Assert.InRange(good.GetProperty("returnToPlayerPercent").GetDouble(), 48.3, 48.5); // 46,875 sin cascadas (27 * 1 + 1 * 3) / 64; el x3 encadena y suma
         Assert.Equal(4, good.GetProperty("totalWeight").GetInt32());
         Assert.False(greedy.GetProperty("valid").GetBoolean());
         Assert.Contains("100%", greedy.GetProperty("error").GetString());
@@ -117,7 +117,7 @@ public sealed class SlotsSettingsTests(PostgresFixture db, RabbitMqFixture rabbi
         Assert.Equal(current + 1, latest.GetProperty("version").GetInt32());
         Assert.Equal(adminId, latest.GetProperty("changedBy").GetGuid());
         Assert.True(DateTimeOffset.UtcNow - latest.GetProperty("changedAt").GetDateTimeOffset() < TimeSpan.FromMinutes(1));
-        Assert.InRange(latest.GetProperty("returnToPlayerPercent").GetDouble(), 46.8, 47.0);
+        Assert.InRange(latest.GetProperty("returnToPlayerPercent").GetDouble(), 48.3, 48.5);
     }
 
     [Fact]

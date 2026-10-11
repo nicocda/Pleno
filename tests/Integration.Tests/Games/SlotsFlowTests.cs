@@ -206,7 +206,7 @@ public sealed class SlotsFlowTests(PostgresFixture db, RabbitMqFixture rabbit) :
         var table = await client.GetFromJsonAsync<JsonElement>("/games/slots/paytable");
         Assert.Equal(3, table.GetProperty("reels").GetInt32());
         Assert.Equal(6, table.GetProperty("symbols").GetArrayLength());
-        Assert.InRange(table.GetProperty("returnToPlayerPercent").GetDouble(), 96.0, 96.3);
+        Assert.InRange(table.GetProperty("returnToPlayerPercent").GetDouble(), 96.3, 96.9);
 
         var placed = await AcceptedAsync(await SpinAsync(client, 10, "mine"));
         var betId = placed.GetProperty("betId").GetGuid();
