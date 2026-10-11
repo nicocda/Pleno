@@ -1,5 +1,6 @@
 import { Application, Container, Graphics, Text } from "pixi.js";
 import { useEffect, useRef } from "react";
+import { canvasResolution, isLite } from "../perf/perf";
 import { pocketColor } from "../lib/roulette";
 import { POCKET_STEP, POCKETS, WHEEL_ORDER, type WheelModel, type WheelPhase } from "../lib/wheel";
 
@@ -50,7 +51,7 @@ export function WheelCanvas({ model, phase, label }: Props) {
     let ready = false;
 
     void app
-      .init({ width: SIZE, height: SIZE, backgroundAlpha: 0, antialias: true, resolution: window.devicePixelRatio || 1, autoDensity: true })
+      .init({ width: SIZE, height: SIZE, backgroundAlpha: 0, antialias: !isLite(), resolution: canvasResolution(), autoDensity: true })
       .then(() => {
         if (cancelled) {
           app.destroy(true);
@@ -88,6 +89,7 @@ export function WheelCanvas({ model, phase, label }: Props) {
         app.stage.addChild(marker);
         marker.position.set(SIZE / 2, SIZE / 2);
 
+        if (isLite()) app.ticker.maxFPS = 30;
         app.ticker.add(() => {
           wheel.rotation = model.wheelAngle;
           const r = model.ballRadius * RADIUS;

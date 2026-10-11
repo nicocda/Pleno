@@ -882,3 +882,13 @@ button.tru-card--playable:hover { transform: translateY(-14px); }
 .win-modal__chain { margin: 0; font-weight: 800; color: #ffc933; }
 .spin-list__chain { font-size: 0.8rem; font-weight: 800; color: #ffc933; }
 @media (prefers-reduced-motion: reduce) { .reel--burst, .reel--drop .reel__cell, .cascade-badge { animation: none; } }
+
+/* ---- Modo ligero (data-perf="lite"): para telefonos con poca GPU/CPU. Sin blur, sin sombras animadas, sin brillos infinitos ---- */
+[data-perf="lite"] .topbar, [data-perf="lite"] .dock { backdrop-filter: none; background: var(--surface); }
+[data-perf="lite"] .live--connected .live__dot, [data-perf="lite"] .gem__glint, [data-perf="lite"] .reels--tense,
+[data-perf="lite"] .reels--mega, [data-perf="lite"] .win-modal--big .win-modal__title, [data-perf="lite"] .win-modal--mega .win-modal__title { animation: none; }
+[data-perf="lite"] .reel--tense { animation: none; }
+[data-perf="lite"] .gem--top { filter: none; }
+[data-perf="lite"] .dock { box-shadow: none; }
+[data-perf="lite"] .win-modal--mega .win-modal__box { box-shadow: none; }
+.perf-select { background: var(--surface); color: inherit; border: 1px solid var(--line); border-radius: 10px; padding: 6px 8px; }

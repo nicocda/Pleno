@@ -1,3 +1,5 @@
+import { isLite } from "../perf/perf";
+
 const COLORS = ["#f5c542", "#e0b04a", "#d63a3a", "#f4efe2", "#2fa968"];
 
 /** Lluvia de confeti en CSS puro; el CSS la oculta con prefers-reduced-motion. */
@@ -8,7 +10,8 @@ const rand = (seed: number) => {
 };
 
 export function Confetti({ pieces = 40 }: { pieces?: number }) {
-  const items = Array.from({ length: pieces }, (_, i) => ({
+  const count = isLite() ? Math.ceil(pieces / 4) : pieces;
+  const items = Array.from({ length: count }, (_, i) => ({
     left: rand(i + 1) * 100,
     delay: rand(i + 101) * 0.6,
     duration: 1.8 + rand(i + 201) * 1.6,
