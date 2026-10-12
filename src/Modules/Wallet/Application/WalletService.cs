@@ -88,6 +88,82 @@ public sealed partial class WalletService(
     public Task<OperationOutcome> ReleaseAsync(Guid accountId, string key, Guid reservationId, CancellationToken ct = default) =>
         ExecuteAsync(accountId, a => a.Release(key, reservationId, clock.GetUtcNow()), ct);
 
+    /// <summary>
+    /// Renueva el plazo de una reserva abierta: vence <paramref name="ttl"/> despues de ahora. Programa un nuevo vencimiento y guarda hasta cuando vale; el que ya estaba programado, al llegar,
+    /// ve que la reserva sigue vigente y no hace nada. Nunca acorta un plazo que ya es mas largo. Devuelve false si la reserva ya no esta abierta (se liquido o se libero).
+    /// </summary>
+    public async Task<bool> ExtendReservationAsync(Guid accountId, Guid reservationId, TimeSpan ttl, CancellationToken ct = default)
+    {
+        var account = await GetAsync(accountId, ct);
+        if (!account.OpenReservations.ContainsKey(reservationId))
+        {
+            return false;
+        }
+
+        var expiresAt = clock.GetUtcNow() + ttl;
+        await using var session = store.LightweightSession();
+        var current = await session.LoadAsync<ReservationLease>(reservationId, ct);
+        if (current is not null && current.ExpiresAt >= expiresAt)
+        {
+            return true; // ya vence mas adelante que lo pedido: no se acorta
+        }
+
+        session.Store(new ReservationLease { Id = reservationId, AccountId = accountId, ExpiresAt = expiresAt });
+        if (outbox is not null)
+        {
+            await using var outboxSession = outbox.Enroll(session);
+            await outboxSession.PublishAsync(new ExpireReservation(reservationId, accountId), ttl);
+        }
+
+        await session.SaveChangesAsync(ct);
+        return true;
+    }
+
+    /// <summary>
+    /// Llego el vencimiento programado de una reserva: si fue renovada y todavia vale, no hace nada (hay otro vencimiento programado mas adelante); si no, la libera. Devuelve true si la libero.
+    /// Limpia el documento de renovacion cuando ya no hace falta.
+    /// </summary>
+    public async Task<bool> ExpireReservationAsync(Guid accountId, Guid reservationId, CancellationToken ct = default)
+    {
+        ReservationLease? lease;
+        await using (var read = store.QuerySession())
+        {
+            lease = await read.LoadAsync<ReservationLease>(reservationId, ct);
+        }
+
+        if (lease is not null && lease.ExpiresAt > clock.GetUtcNow().AddMilliseconds(250))
+        {
+            return false; // renovada: el vencimiento que vale es otro
+        }
+
+        var released = false;
+        try
+        {
+            await ReleaseAsync(accountId, $"expire:{reservationId:N}", reservationId, ct);
+            released = true;
+        }
+        catch (WalletDomainException ex) when (ex.Error is WalletError.ReservationNotOpen or WalletError.ReservationNotFound)
+        {
+            // Ya se liquido (el caso normal) o nunca existio: nada que compensar.
+        }
+
+        if (lease is not null)
+        {
+            await using var session = store.LightweightSession();
+            session.Delete<ReservationLease>(reservationId);
+            await session.SaveChangesAsync(ct);
+        }
+
+        return released;
+    }
+
+    /// <summary>Hasta cuando vale una reserva renovada, o null si nunca se renovo (vale el plazo con el que se reservo). Sirve para diagnostico y pruebas.</summary>
+    public async Task<DateTimeOffset?> GetRenewedExpiryAsync(Guid reservationId, CancellationToken ct = default)
+    {
+        await using var session = store.QuerySession();
+        return (await session.LoadAsync<ReservationLease>(reservationId, ct))?.ExpiresAt;
+    }
+
     public Task<OperationOutcome> ReverseAsync(Guid accountId, string key, Guid transactionId, CancellationToken ct = default) =>
         ExecuteAsync(accountId, a => a.Reverse(key, transactionId, clock.GetUtcNow()), ct);
 

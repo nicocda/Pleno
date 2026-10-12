@@ -64,15 +64,27 @@ public sealed class RoundResolvedHandler(WalletService wallet)
 /// </summary>
 public sealed class ExpireReservationHandler(WalletService wallet)
 {
-    public async Task Handle(ExpireReservation message, CancellationToken ct)
+    // Si un juego renovo la reserva, este vencimiento (el original u otro anterior) no vale: ExpireReservationAsync lo ignora.
+    public async Task Handle(ExpireReservation message, CancellationToken ct) =>
+        await wallet.ExpireReservationAsync(message.AccountId, message.BetId, ct);
+}
+
+/// <summary>
+/// Un juego renueva una reserva que sigue abierta (una partida larga). El plazo nuevo se acota igual que al reservar. Renovar algo que ya se cerro no hace nada: el juego se entero por
+/// <c>StakeSettled</c> o <c>StakeReleased</c>.
+/// </summary>
+public sealed class ExtendReservationHandler(WalletService wallet)
+{
+    public async Task Handle(ExtendReservation command, CancellationToken ct)
     {
         try
         {
-            await wallet.ReleaseAsync(message.AccountId, $"expire:{message.BetId:N}", message.BetId, ct);
+            var seconds = Math.Clamp(command.TtlSeconds, ReserveStakeHandler.MinTtlSeconds, ReserveStakeHandler.MaxTtlSeconds);
+            await wallet.ExtendReservationAsync(command.AccountId, command.BetId, TimeSpan.FromSeconds(seconds), ct);
         }
-        catch (WalletDomainException ex) when (ex.Error is WalletError.ReservationNotOpen or WalletError.ReservationNotFound)
+        catch (WalletDomainException ex) when (ex.Error is WalletError.AccountNotFound)
         {
-            // Ya se liquido (el caso normal) o nunca existio: nada que compensar.
+            // Una cuenta que no existe no tiene reservas que renovar.
         }
     }
 }

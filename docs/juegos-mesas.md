@@ -11,6 +11,8 @@ sus reglas. Complementa al [contrato de juegos](juegos-contrato.md) (y a las mes
 - **Opciones de cada juego y cotización:** un juego puede declarar opciones de creación (`ITableGame.Options`: números o elecciones, p. ej. ciegas y recompras del Poker) y cotizar la mesa (`ITableGame.Quote`: cuánto se
   reserva por asiento, las opciones ya normalizadas, un resumen y un desglose, o el motivo si no es válida). `POST /games/{id}/quote` la devuelve antes de crear; `GET /games/{id}/rules` lista las opciones y
   `CreateTableBody.Options` las trae. Un juego que lee configuración de la casa implementa `IConfigurableGame`.
+- **Renovación de reservas:** la Wallet libera sola una reserva a la hora como máximo. Mientras una partida está en curso, el motor renueva la reserva de cada asiento cada `ReservationRenewSeconds`
+  (`ExtendReservation`), así una partida larga no pierde sus fichas; si el motor se cae, deja de renovar y la reserva vence sola ([ADR 0016](adr/0016-renovacion-de-reservas.md)).
 - **Jugar fuera de turno:** `ITableGame.MayAct(state, seat)` deja que un asiento actúe sin ser el del turno (por ejemplo, decidir una recompra durante la pausa).
 - **Turnos y tiempos:** el turno tiene un límite (lo define el juego); si vence, juega el turno de "no actuó"; con 3 vencidos seguidos el asiento queda ausente y juega un bot.
   Un juego puede marcar un turno como **automático** (`TurnInfo.Automatic`, por ejemplo la pausa entre manos del Poker): al vencer el motor juega `TimeoutAction` sin contarle una falta a nadie.
@@ -32,5 +34,5 @@ La plataforma ya trae sus tests de integración (mesas, fichas, ausentes, privad
 - [Uno](juego-uno.md) · [Truco](juego-truco.md) · [Poker](juego-poker.md).
 
 ## Configuración (sección `Tables`)
-`BotThinkMilliseconds` (1.500), `OpenTableMinutes` (15), `ReservationSeconds` (3.600), `TickMilliseconds` (300) y `EngineEnabled` (true). **El motor tiene que correr en UNA sola
+`BotThinkMilliseconds` (1.500), `OpenTableMinutes` (15), `ReservationSeconds` (3.600), `ReservationRenewSeconds` (600), `TickMilliseconds` (300) y `EngineEnabled` (true). **El motor tiene que correr en UNA sola
 instancia** del servicio de juegos; las pruebas lo apagan y lo manejan a mano (`TableService.TickAsync`).

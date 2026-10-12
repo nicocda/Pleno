@@ -409,8 +409,38 @@ public sealed partial class TableService(
         var staleBefore = now.AddMinutes(-options.OpenTableMinutes);
         var stale = await query.Query<PlayerTable>().Where(t => t.Status == TableStatus.Open && t.CreatedAt < staleBefore).Select(t => t.Id).ToListAsync(ct);
 
-        await Task.WhenAll(due.Select(id => SafelyAsync(() => AutoPlayAsync(id, ct), id)).Concat(stale.Select(id => SafelyAsync(() => CancelAsync(id, "OpenTableExpired", ct), id))));
+        // Las partidas en curso renuevan sus reservas cada tanto: la Wallet las libera sola al plazo y una partida larga no puede perder sus fichas.
+        var renewBefore = now.AddSeconds(-options.ReservationRenewSeconds);
+        var playing = await query.Query<PlayerTable>().Where(t => t.Status == TableStatus.Playing).Select(t => new { t.Id, t.ReservationsRenewedAt, t.StartedAt }).ToListAsync(ct);
+        var renew = playing.Where(t => (t.ReservationsRenewedAt ?? t.StartedAt ?? now) <= renewBefore).Select(t => t.Id).ToList();
+
+        await Task.WhenAll(
+            due.Select(id => SafelyAsync(() => AutoPlayAsync(id, ct), id))
+                .Concat(stale.Select(id => SafelyAsync(() => CancelAsync(id, "OpenTableExpired", ct), id)))
+                .Concat(renew.Select(id => SafelyAsync(() => RenewReservationsAsync(id, ct), id))));
     }
+
+    /// <summary>Renueva la reserva de cada asiento humano de una partida en curso (<see cref="ExtendReservation"/>) y anota cuando.</summary>
+    public Task RenewReservationsAsync(Guid tableId, CancellationToken ct = default) =>
+        RetryAsync(async () =>
+        {
+            await using var session = store.LightweightSession();
+            var table = await session.LoadAsync<PlayerTable>(tableId, ct);
+            if (table is not { Status: TableStatus.Playing })
+            {
+                return;
+            }
+
+            await using var outboxSession = outbox.Enroll(session);
+            foreach (var bet in await session.Query<TableBet>().Where(b => b.TableId == tableId && b.Status == RoundStatus.Placed && b.Reserved).ToListAsync(ct))
+            {
+                await outboxSession.PublishAsync(new ExtendReservation(bet.Id, bet.AccountId, options.ReservationSeconds));
+            }
+
+            table.ReservationsRenewedAt = clock.GetUtcNow();
+            session.Store(table);
+            await session.SaveChangesAsync(ct);
+        });
 
     /// <summary>Una jugada automatica en el turno que vencio: la hace el bot (o un bot por el jugador ausente) o la de "no actuo a tiempo".</summary>
     public Task AutoPlayAsync(Guid tableId, CancellationToken ct = default) =>
