@@ -38,7 +38,7 @@ internal static class TableEndpoints
         group.MapGet("/rules", (TableService tables) =>
         {
             var game = tables.GameOf(gameId);
-            return Results.Ok(new { game.MinPlayers, game.MaxPlayers, game.MinBuyIn, game.MaxBuyIn });
+            return Results.Ok(new { game.MinPlayers, game.MaxPlayers, game.MinBuyIn, game.MaxBuyIn, game.AllowsBots });
         });
 
         group.MapPost("/tables", async (CreateTableBody body, HttpContext http, TableService tables, CancellationToken ct) =>

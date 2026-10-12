@@ -238,6 +238,11 @@ public sealed partial class TableService(
         {
             await using var session = store.LightweightSession();
             var table = await OpenTableOfOwnerAsync(session, tableId, userId, ct);
+            if (!GameOf(table.GameId).AllowsBots)
+            {
+                throw new GamesDomainException(GamesError.InvalidAction, "Este juego no tiene bots.");
+            }
+
             if (table.Seats.Count >= table.MaxPlayers)
             {
                 throw new GamesDomainException(GamesError.TableClosed, "La mesa esta llena.");
@@ -277,7 +282,7 @@ public sealed partial class TableService(
             var game = GameOf(table.GameId);
             if (table.Seats.Count < game.MinPlayers)
             {
-                throw new GamesDomainException(GamesError.TableClosed, $"Hacen falta al menos {game.MinPlayers} jugadores (podes sumar bots).");
+                throw new GamesDomainException(GamesError.TableClosed, game.AllowsBots ? $"Hacen falta al menos {game.MinPlayers} jugadores (podes sumar bots)." : $"Hacen falta al menos {game.MinPlayers} jugadores.");
             }
 
             var reserved = await session.Query<TableBet>().CountAsync(b => b.TableId == tableId && b.Status == RoundStatus.Placed && b.Reserved, ct);
@@ -401,7 +406,11 @@ public sealed partial class TableService(
             var game = GameOf(table.GameId);
             var seat = table.Seats[seatNo];
             string action;
-            if (seat.IsBot || seat.Away)
+            if (game.Turn(table.StateJson!)?.Automatic == true)
+            {
+                action = game.TimeoutAction(table.StateJson!, seatNo); // pausa del juego (entre manos): no es una falta de nadie
+            }
+            else if (seat.IsBot || seat.Away)
             {
                 action = game.BotAction(table.StateJson!, seatNo);
             }
@@ -541,7 +550,12 @@ public sealed partial class TableService(
             var turn = game.Turn(state) ?? throw new InvalidOperationException($"El juego {table.GameId} no termino pero tampoco tiene turno.");
             var seat = table.Seats[turn.Seat];
             table.TurnSeat = turn.Seat;
-            if (seat.IsBot || seat.Away)
+            if (turn.Automatic)
+            {
+                table.TurnEndsAt = now.AddSeconds(turn.Seconds);
+                table.NextAutoAt = table.TurnEndsAt;
+            }
+            else if (seat.IsBot || seat.Away)
             {
                 table.TurnEndsAt = null;
                 table.NextAutoAt = now.AddMilliseconds(options.BotThinkMilliseconds);

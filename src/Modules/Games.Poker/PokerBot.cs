@@ -13,7 +13,7 @@ internal static class PokerBot
         var toCall = s.CurrentBet - p.Bet;
         var strength = s.Board.Count == 0 ? PreflopStrength(p.Cards) : PostflopStrength(p.Cards, s.Board);
         var (minTo, maxTo) = PokerGame.RaiseLimits(s, seat);
-        var canRaise = p.Stack > toCall;
+        var canRaise = PokerGame.CanRaise(s, seat);
         var potOdds = toCall == 0 ? 0 : (double)toCall / (s.Pot + toCall);
 
         // Subida "de tamaño razonable": la mitad del pozo por encima de lo que hay que igualar.
