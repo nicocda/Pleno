@@ -11,6 +11,8 @@ public sealed class PokerTests
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
     private static readonly PokerGame Game = new();
     private static readonly Guid TableId = Guid.Parse("00000000-0000-0000-0000-000000000001");
+    private static readonly int[] HandsChecked = [1, 10, 11, 20, 21, 31, 41];
+    private static readonly int[] SeatCounts = [2, 3, 4, 5, 6];
 
     private const int Spades = 0;
     private const int Hearts = 1;
@@ -711,7 +713,7 @@ public sealed class PokerTests
     [Fact]
     public void The_blinds_rise_every_ten_hands_rounded_up_to_an_even_number()
     {
-        Assert.Equal([4L, 4L, 6L, 6L, 10L, 16L, 24L], new[] { 1, 10, 11, 20, 21, 31, 41 }.Select(h => PokerGame.BigBlindAt(4, h, 10, 50)));
+        Assert.Equal([4L, 4L, 6L, 6L, 10L, 16L, 24L], HandsChecked.Select(h => PokerGame.BigBlindAt(4, h, 10, 50)));
 
         var state = StartTournament(3, 100, """{"bigBlind":4}""");
         var level = (PokerView)Game.View(state, 0);
@@ -848,7 +850,7 @@ public sealed class PokerTests
         Assert.Equal([150L, 90L, 60L], PokerGame.Prizes(300, 5));
         Assert.Equal([300L, 180L, 120L], PokerGame.Prizes(600, 6));
         Assert.Equal([66L, 35L], PokerGame.Prizes(101, 3)); // el resto del redondeo va al primero
-        Assert.All(new[] { 2, 3, 4, 5, 6 }, seats => Assert.Equal(777L, PokerGame.Prizes(777, seats).Sum()));
+        Assert.All(SeatCounts, seats => Assert.Equal(777L, PokerGame.Prizes(777, seats).Sum()));
     }
 
     [Fact]
