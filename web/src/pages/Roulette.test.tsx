@@ -109,6 +109,14 @@ describe("Roulette table", () => {
     });
   });
 
+  it("puts the column bets inside the number grid, one at the end of each row", () => {
+    renderApp(<Roulette />, { api: apiWith() });
+
+    for (const name of ["Columna 1", "Columna 2", "Columna 3"]) {
+      expect(spot(name).closest(".board__numbers")).not.toBeNull();
+    }
+  });
+
   it("adds chips when the same place is tapped again", async () => {
     renderApp(<Roulette />, { api: apiWith() });
 
