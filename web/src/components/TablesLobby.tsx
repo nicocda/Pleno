@@ -49,13 +49,13 @@ export function TablesLobby<G>({ gameId, gameName, renderGame }: TablesLobbyProp
   return <TableList gameId={gameId} gameName={gameName} tables={tables.data} loading={tables.isLoading} failed={tables.isError} onEnter={enter} />;
 }
 
-const STEPS = ["Creá una mesa o unite a una abierta", "Sumá bots o esperá a otros jugadores", "El dueño toca Empezar y se reparte"];
+const stepsFor = (allowsBots: boolean): string[] => ["Creá una mesa o unite a una abierta", allowsBots ? "Sumá bots o esperá a otros jugadores" : "Esperá a otros jugadores", "El dueño toca Empezar y se reparte"];
 
 /** Los tres pasos de una partida entre jugadores, con el actual resaltado: guia a quien no sabe por donde empezar. */
-function HowItWorks({ current }: { current: 1 | 2 | 3 }) {
+function HowItWorks({ current, allowsBots }: { current: 1 | 2 | 3; allowsBots: boolean }) {
   return (
     <ol className="tl-steps" aria-label="Cómo se juega en mesa">
-      {STEPS.map((text, i) => (
+      {stepsFor(allowsBots).map((text, i) => (
         <li key={text} className={`tl-step ${i + 1 === current ? "tl-step--now" : ""} ${i + 1 < current ? "tl-step--done" : ""}`} aria-current={i + 1 === current ? "step" : undefined}>
           <span className="tl-step__n" aria-hidden="true">{i + 1 < current ? "✓" : i + 1}</span>
           <span>{text}</span>
@@ -70,6 +70,7 @@ const plural = (n: number, one: string, many: string): string => `${n} ${n === 1
 // ---- Lista de mesas ----
 
 function TableList({ gameId, gameName, tables, loading, failed, onEnter }: { gameId: string; gameName: string; tables: TableSummary[] | undefined; loading: boolean; failed: boolean; onEnter: (id: string) => void }) {
+  const allowsBots = useTableRules(gameId).data?.allowsBots !== false;
   const rules = useTableRules(gameId);
   const join = useJoinTable(gameId);
   const joinByCode = useJoinByCode(gameId);
@@ -98,12 +99,12 @@ function TableList({ gameId, gameName, tables, loading, failed, onEnter }: { gam
 
   return (
     <div className="stack">
-      <HowItWorks current={1} />
+      <HowItWorks current={1} allowsBots={allowsBots} />
       <section className="card tl-list" aria-labelledby="tl-mesas">
         <h2 id="tl-mesas" className="section-title">Mesas abiertas</h2>
         {loading && <p className="muted" role="status">Cargando las mesas…</p>}
         {failed && <p className="notice notice--error" role="alert">No pudimos cargar las mesas.</p>}
-        {!loading && !failed && open.length === 0 && <p className="muted">No hay mesas abiertas. Creá la primera y sumá un bot para jugar enseguida.</p>}
+        {!loading && !failed && open.length === 0 && <p className="muted">No hay mesas abiertas. {allowsBots ? "Creá la primera y sumá un bot para jugar enseguida." : "Creá la primera y esperá a otros jugadores."}</p>}
         <ul className="tl-tables" aria-label="Mesas abiertas">
           {open.map((table) => (
             <li key={table.id} className="tl-table">
@@ -183,7 +184,7 @@ function CreateTable({ gameId, gameName, rules, rulesFailed, onCreated }: { game
   return (
     <section className="card" aria-labelledby="tl-crear">
       <h2 id="tl-crear" className="section-title">Crear mesa</h2>
-      <p className="muted tl-intro">¿No hay una mesa para vos? Armá la tuya: elegí cuántas fichas pone cada uno y cuántos juegan. Después la abrís a otros jugadores o sumás bots.</p>
+      <p className="muted tl-intro">¿No hay una mesa para vos? Armá la tuya: elegí cuántas fichas pone cada uno y cuántos juegan. {rules.allowsBots === false ? "Después la abrís a otros jugadores." : "Después la abrís a otros jugadores o sumás bots."}</p>
       <form id="tl-create-form" className="tl-form" onSubmit={(e) => void submit(e)}>
         <label className="field">
           <span>Nombre (opcional)</span>
@@ -204,7 +205,7 @@ function CreateTable({ gameId, gameName, rules, rulesFailed, onCreated }: { game
             ))}
           </div>
         </div>
-        <p className="tl-hint">Cuántos asientos tiene la mesa; los que no ocupen personas los podés completar con bots.</p>
+        <p className="tl-hint">Cuántos asientos tiene la mesa{rules.allowsBots === false ? "." : "; los que no ocupen personas los podés completar con bots."}</p>
         <label className="tl-check">
           <input type="checkbox" checked={isPrivate} aria-describedby="tl-private-hint" onChange={(e) => setIsPrivate(e.target.checked)} />
           <span>Mesa privada (se entra con un código)</span>
@@ -270,9 +271,9 @@ function TableRoom<G>({ gameId, gameName, tableId, renderGame, onExit }: { gameI
 // ---- Sala de espera ----
 
 /** Por que todavia no se puede empezar (null si se puede). */
-export function startBlocker(table: Pick<TableState, "seats" | "minPlayers">): string | null {
+export function startBlocker(table: Pick<TableState, "seats" | "minPlayers">, allowsBots = true): string | null {
   const missing = table.minPlayers - table.seats.length;
-  if (missing > 0) return `Faltan ${plural(missing, "jugador", "jugadores")} para empezar (mínimo ${table.minPlayers}). Podés sumar bots.`;
+  if (missing > 0) return `Faltan ${plural(missing, "jugador", "jugadores")} para empezar (mínimo ${table.minPlayers}).${allowsBots ? " Podés sumar bots." : ""}`;
   const waiting = table.seats.filter((s) => !s.ready).length;
   if (waiting > 0) return `Esperando que se confirmen las fichas de ${plural(waiting, "asiento", "asientos")}.`;
   return null;
@@ -281,11 +282,12 @@ export function startBlocker(table: Pick<TableState, "seats" | "minPlayers">): s
 function WaitingRoom({ gameId, gameName, table, onExit }: { gameId: string; gameName: string; table: TableState; onExit: () => void }) {
   const leave = useLeaveTable(gameId);
   const bots = useTableBots(gameId, table.id);
+  const allowsBots = useTableRules(gameId).data?.allowsBots !== false;
   const start = useStartTable(gameId);
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
 
-  const blocker = startBlocker(table);
+  const blocker = startBlocker(table, allowsBots);
   const botCount = table.seats.filter((s) => s.isBot).length;
   const free = Array.from({ length: Math.max(0, table.maxPlayers - table.seats.length) }, (_, i) => i);
   const busy = leave.isPending || bots.add.isPending || bots.remove.isPending || start.isPending;
@@ -303,7 +305,7 @@ function WaitingRoom({ gameId, gameName, table, onExit }: { gameId: string; game
 
   return (
     <div className="stack">
-    <HowItWorks current={table.seats.length < table.minPlayers || blocker !== null ? 2 : 3} />
+    <HowItWorks current={table.seats.length < table.minPlayers || blocker !== null ? 2 : 3} allowsBots={allowsBots} />
     <section className="card tl-room" aria-labelledby="tl-sala">
       <h2 id="tl-sala" className="section-title">{table.name}</h2>
       <p className="muted">
@@ -347,12 +349,16 @@ function WaitingRoom({ gameId, gameName, table, onExit }: { gameId: string; game
 
       {table.isOwner ? (
         <div className="tl-actions dock">
-          <button type="button" className="btn btn--ghost" disabled={busy || table.seats.length >= table.maxPlayers} onClick={() => { setError(null); bots.add.mutate(undefined, { onError: fail }); }}>
-            Agregar bot
-          </button>
-          <button type="button" className="btn btn--ghost" disabled={busy || botCount === 0} onClick={() => { setError(null); bots.remove.mutate(undefined, { onError: fail }); }}>
-            Quitar bot
-          </button>
+          {allowsBots && (
+            <>
+              <button type="button" className="btn btn--ghost" disabled={busy || table.seats.length >= table.maxPlayers} onClick={() => { setError(null); bots.add.mutate(undefined, { onError: fail }); }}>
+                Agregar bot
+              </button>
+              <button type="button" className="btn btn--ghost" disabled={busy || botCount === 0} onClick={() => { setError(null); bots.remove.mutate(undefined, { onError: fail }); }}>
+                Quitar bot
+              </button>
+            </>
+          )}
           <button type="button" className="btn btn--gold" disabled={busy || blocker !== null} aria-describedby={blocker ? "tl-blocker" : undefined} onClick={() => { setError(null); start.mutate(table.id, { onError: fail }); }}>
             Empezar
           </button>

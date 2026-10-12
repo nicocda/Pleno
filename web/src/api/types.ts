@@ -467,6 +467,8 @@ export interface TableRules {
   maxPlayers: number;
   minBuyIn: number;
   maxBuyIn: number;
+  /** Si se pueden sumar bots a la mesa (el poker no los tiene). Ausente = si. */
+  allowsBots?: boolean;
 }
 
 /** Una mesa en el listado. `mine`: estoy sentado. */
@@ -566,7 +568,7 @@ export type UnoAction = { type: "play"; card: number; color?: number } | { type:
 
 // Poker (Texas Hold'em de una mano por mesa)
 export type PokerStreet = "preflop" | "flop" | "turn" | "river" | "done";
-export type PokerEventKind = "blind" | "fold" | "check" | "call" | "bet" | "raise" | "flop" | "turn" | "river" | "win" | "win_showdown";
+export type PokerEventKind = "blind" | "fold" | "check" | "call" | "bet" | "raise" | "flop" | "turn" | "river" | "win" | "win_showdown" | "hand" | "out";
 export type PokerCategoryName = "HighCard" | "Pair" | "TwoPair" | "ThreeOfAKind" | "Straight" | "Flush" | "FullHouse" | "FourOfAKind" | "StraightFlush";
 export type PokerActionName = "call" | "check" | "fold" | "raise";
 
@@ -589,6 +591,15 @@ export interface PokerPlayer {
   /** null salvo las propias y, al showdown, las de quienes siguen en la mano. */
   cards: number[] | null;
   cardCount: number;
+  /** Se quedo sin fichas: ya no juega manos. */
+  out: boolean;
+}
+
+/** Un pozo de la mano (el principal o uno lateral) con quienes podian ganarlo y quienes lo ganaron. */
+export interface PokerPot {
+  amount: number;
+  eligible: number[];
+  winners: number[];
 }
 
 export interface PokerShowdownEntry {
@@ -617,8 +628,18 @@ export interface PokerView {
   actions: PokerActionName[];
   showdown: PokerShowdownEntry[];
   winnings: number[];
+  /** La MANO termino (la partida sigue salvo que `over`). */
   done: boolean;
   events: PokerEvent[];
+  /** Numero de la mano en curso (desde 1). */
+  handNo: number;
+  /** La PARTIDA termino: queda uno con todas las fichas. */
+  over: boolean;
+  /** Compromiso (SHA-256) de la semilla de esta mano, publicado antes de repartir. */
+  commitment: string;
+  /** La semilla de la mano, revelada cuando la mano termina. */
+  handSeed: string | null;
+  pots: PokerPot[];
 }
 
 /** La jugada propia de Poker. `to`: monto TOTAL al que se sube en esta ronda. */

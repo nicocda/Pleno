@@ -12,14 +12,14 @@ import { playWinSound } from "../lib/winSound";
 
 const GAME_ID = "poker";
 
-/** Poker (Texas Hold'em, una mano por mesa): mesas entre jugadores (y bots), cada uno entra con la misma entrada y al final cobra lo que le queda. */
+/** Poker (Texas Hold'em por manos): mesas entre jugadores (sin bots), cada uno entra con la misma entrada y se juega mano tras mano hasta que uno se queda con todas las fichas. */
 export function Poker() {
   return (
     <div className="stack">
       <header>
         <p className="eyebrow">Poker</p>
         <h1 className="display">Texas Hold'em</h1>
-        <p className="muted">Armá una mesa de 2 a 6 jugadores (o con bots), cada uno entra con la misma entrada y se juega una mano: ciegas automáticas, cuatro rondas de apuestas y showdown. El mazo se baraja con una semilla comprometida de antemano y se revela al terminar.</p>
+        <p className="muted">Armá una mesa de 2 a 6 jugadores: cada uno entra con la misma entrada y se juegan manos una tras otra (ciegas automáticas, cuatro rondas de apuestas y showdown) hasta que uno se queda con todas las fichas. Cada mano se baraja con una semilla comprometida de antemano y se revela al terminar la mano.</p>
       </header>
       <TablesLobby<PokerView> gameId={GAME_ID} gameName="Poker" renderGame={(table, leave) => <PokerTable table={table} onLeave={leave} />} />
       <Rules />
@@ -32,12 +32,12 @@ function Rules() {
     <section className="card" aria-labelledby="pk-reglas">
       <h2 id="pk-reglas" className="section-title">Reglas</h2>
       <ul className="pk-rules">
-        <li>Cada asiento entra con la misma entrada (de 20 a 2.000 fichas). Las ciegas son automáticas: la chica es la entrada dividida 50 (mínimo 1) y la grande, el doble.</li>
+        <li>Cada asiento entra con la misma entrada (de 20 a 2.000 fichas) y la partida sigue mano tras mano: las fichas pasan de unos a otros hasta que uno se queda con todo y cobra lo puesto entre todos. Las ciegas son automáticas: la chica es la entrada dividida 50 (mínimo 1) y la grande, el doble, y el botón rota en cada mano.</li>
         <li>Recibís 2 cartas privadas y se muestran hasta 5 comunitarias (flop, turn y river). Armás tu mejor mano de 5 entre tus 2 cartas y las de la mesa.</li>
         <li>Límite libre: podés subir hasta todo lo que tenés. Si no te alcanza para subir pero sí para igualar, igualar es all-in.</li>
-        <li>Hay 4 rondas de apuestas (preflop, flop, turn y river) y un solo pozo. Si todos se retiran menos uno, se lleva el pozo sin mostrar cartas; si no, hay showdown.</li>
-        <li>Al terminar cobrás lo que te queda de tu entrada: tu ganancia neta es lo que cobrás menos lo que pusiste.</li>
-        <li>Cada turno dura 30 segundos. Si no actuás, pasás (si es gratis) o te retirás; con 3 turnos vencidos seguidos un bot juega por vos. No se puede salir en plena partida.</li>
+        <li>Hay 4 rondas de apuestas (preflop, flop, turn y river). Si alguien va all-in por menos que los demás se arma un pozo lateral: cada pozo lo gana la mejor mano entre quienes llegaron a ese nivel, y lo que nadie igualó vuelve a su dueño. Si todos se retiran menos uno, se lleva el pozo sin mostrar cartas; si no, hay showdown.</li>
+        <li>Quien se queda sin fichas queda eliminado. Entre mano y mano hay una pausa de unos segundos. Al terminar la partida, tu ganancia neta es lo que cobrás menos lo que pusiste.</li>
+        <li>Cada turno dura 30 segundos. Si no actuás, pasás (si es gratis) o te retirás; con 3 turnos vencidos seguidos quedás ausente y la mesa pasa o se retira por vos (no apuesta). No hay bots y no se puede salir en plena partida.</li>
       </ul>
     </section>
   );
@@ -96,28 +96,30 @@ function PokerTable({ table, onLeave }: { table: LiveTable<PokerView>; onLeave: 
 
   if (!game) return <p className="muted" role="status">Repartiendo las cartas…</p>;
 
-  const over = finished || game.done;
-  const myTurn = !over && mySeat !== null && game.current === mySeat;
+  const handDone = finished || game.done; // la mano en pantalla ya terminó
+  const myTurn = !handDone && mySeat !== null && game.current === mySeat;
   const turnSeconds = secondsUntil(table.turnEndsAt, serverNow);
   const me = game.players.find((p) => p.seat === mySeat);
   const players = [...game.players].sort((a, b) => a.seat - b.seat);
   const winners = game.showdown.length > 0 ? game.showdown.filter((s) => s.won).map((s) => s.seat) : game.winnings.flatMap((w, seat) => (w > 0 ? [seat] : []));
   const winnerEntry = game.showdown.find((s) => s.won);
   const winnerText = winners.length === 0 ? "" : `Ganó ${winners.map(nameOf).join(" y ")}${winnerEntry ? ` con ${handName(winnerEntry, game.board)}` : ""}`;
+  const champion = finished ? players.find((p) => p.stack > 0)?.seat : undefined;
 
   const send = (action: PokerAction) => {
     setError(null);
     act.mutate(action, { onError: (e) => setError(detailedErrorMessage(e)) });
   };
 
-  const statusLabel = over ? (winnerText || "La mano terminó")
+  const statusLabel = finished ? (champion !== undefined ? `Terminó la partida: ${nameOf(champion)} se llevó todas las fichas` : "La partida terminó")
+    : handDone ? `${winnerText || "La mano terminó"} · la mano ${game.handNo + 1} empieza en ${turnSeconds} s`
     : mySeat === null ? `Mirando la mano: juega ${nameOf(game.current)}`
     : myTurn ? `Es tu turno (${turnSeconds} s)${game.toCall > 0 ? `: igualá ${formatChips(Math.min(game.toCall, me?.stack ?? game.toCall))} o subí` : ": pasá o apostá"}`
-    : `Juega ${nameOf(game.current)}${table.seats.find((s) => s.seat === game.current)?.away ? " (ausente: lo juega un bot)" : ""}`;
+    : `Juega ${nameOf(game.current)}${table.seats.find((s) => s.seat === game.current)?.away ? " (ausente: no apuesta)" : ""}`;
 
   const proof = async () => {
-    if (table.serverSeed === null) return;
-    setVerification({ ok: (await sha256Hex(table.serverSeed)) === table.commitment.toLowerCase() });
+    if (game.handSeed === null) return;
+    setVerification({ ok: (await sha256Hex(game.handSeed)) === game.commitment.toLowerCase() });
   };
 
   const board = [...game.board, ...Array<null>(Math.max(0, 5 - game.board.length)).fill(null)];
@@ -127,7 +129,7 @@ function PokerTable({ table, onLeave }: { table: LiveTable<PokerView>; onLeave: 
       <section className="card" aria-labelledby="pk-mesa">
         <div className="pk-head">
           <h2 id="pk-mesa" className="section-title">{table.name}</h2>
-          <p className="muted">Entrada de {formatChips(table.buyIn)} fichas · ciegas {formatChips(Math.max(1, Math.floor(table.buyIn / 50)))} y {formatChips(Math.max(1, Math.floor(table.buyIn / 50)) * 2)}</p>
+          <p className="muted">Mano {game.handNo} · entrada de {formatChips(table.buyIn)} fichas · ciegas {formatChips(Math.max(1, Math.floor(table.buyIn / 50)))} y {formatChips(Math.max(1, Math.floor(table.buyIn / 50)) * 2)}</p>
         </div>
         <p role="status" className="crash-status" data-testid="pk-status">{statusLabel}</p>
 
@@ -141,7 +143,7 @@ function PokerTable({ table, onLeave }: { table: LiveTable<PokerView>; onLeave: 
 
           <ul className="pk-players" aria-label="Jugadores">
             {players.map((p) => (
-              <PlayerView key={p.seat} player={p} game={game} seat={table.seats.find((s) => s.seat === p.seat)} name={nameOf(p.seat)} mine={p.seat === mySeat} active={!over && game.current === p.seat} turnSeconds={turnSeconds} over={over} board={game.board} />
+              <PlayerView key={p.seat} player={p} game={game} seat={table.seats.find((s) => s.seat === p.seat)} name={nameOf(p.seat)} mine={p.seat === mySeat} active={!handDone && game.current === p.seat} turnSeconds={turnSeconds} over={handDone} board={game.board} />
             ))}
           </ul>
 
@@ -163,7 +165,7 @@ function PokerTable({ table, onLeave }: { table: LiveTable<PokerView>; onLeave: 
           {error && <p className="notice notice--error" role="alert">{error}</p>}
         </div>
 
-        {over && (
+        {finished && (
           <div role="status" className="pk-result" data-testid="pk-result">
             {net !== null && (
               <p>
@@ -177,7 +179,22 @@ function PokerTable({ table, onLeave }: { table: LiveTable<PokerView>; onLeave: 
         )}
       </section>
 
-      {over && game.showdown.length > 0 && (
+      {handDone && game.pots.length > 1 && (
+        <section className="card" aria-labelledby="pk-pozos">
+          <h2 id="pk-pozos" className="section-title">Pozos de la mano {game.handNo}</h2>
+          <ul className="pk-showdown" aria-label="Pozos">
+            {game.pots.map((pot, i) => (
+              <li key={i} className="pk-showdown__row" data-testid="pk-pot-row">
+                <span className="pk-showdown__name">{i === 0 ? "Pozo principal" : `Pozo lateral ${i}`}</span>
+                <span>{formatChips(pot.amount)} fichas</span>
+                <span>{pot.eligible.length === 1 ? `Vuelve a ${nameOf(pot.eligible[0]!)}` : `Ganó ${pot.winners.map(nameOf).join(" y ")}`}</span>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+
+      {handDone && game.showdown.length > 0 && (
         <section className="card" aria-labelledby="pk-showdown">
           <h2 id="pk-showdown" className="section-title">Showdown</h2>
           <ul className="pk-showdown" aria-label="Manos reveladas">
@@ -204,19 +221,19 @@ function PokerTable({ table, onLeave }: { table: LiveTable<PokerView>; onLeave: 
       </section>
 
       <section className="card" aria-labelledby="pk-verificar">
-        <h2 id="pk-verificar" className="section-title">Verificá la partida</h2>
-        <p className="muted">Antes de repartir el servidor publicó el compromiso (el hash de su semilla). Al terminar la mano revela la semilla: si su hash coincide con el compromiso, el mazo no se cambió durante el juego.</p>
+        <h2 id="pk-verificar" className="section-title">Verificá la mano {game.handNo}</h2>
+        <p className="muted">Antes de repartir cada mano el servidor publica el compromiso (el hash de la semilla de esa mano). Al terminar la mano revela la semilla: si su hash coincide con el compromiso, el mazo no se cambió durante el juego.</p>
         <dl className="crash-proof">
-          <dt>Compromiso</dt>
-          <dd className="mono">{table.commitment}</dd>
-          {table.serverSeed !== null && (
+          <dt>Compromiso de la mano</dt>
+          <dd className="mono">{game.commitment}</dd>
+          {game.handSeed !== null && (
             <>
               <dt>Semilla revelada</dt>
-              <dd className="mono">{table.serverSeed}</dd>
+              <dd className="mono">{game.handSeed}</dd>
             </>
           )}
         </dl>
-        {table.serverSeed !== null ? (
+        {game.handSeed !== null ? (
           <>
             <button type="button" className="btn btn--ghost" onClick={() => void proof()}>Verificar en mi navegador</button>
             {verification && (
@@ -226,7 +243,7 @@ function PokerTable({ table, onLeave }: { table: LiveTable<PokerView>; onLeave: 
             )}
           </>
         ) : (
-          <p className="muted">La semilla se revela cuando termina la mano.</p>
+          <p className="muted">La semilla de esta mano se revela cuando termina.</p>
         )}
       </section>
 
@@ -294,9 +311,9 @@ function ActionBar({ game, stack, bet, pending, onAct }: { game: PokerView; stac
 
 function PlayerView({ player, game, seat, name, mine, active, turnSeconds, over, board }: { player: PokerPlayer; game: PokerView; seat: TableSeat | undefined; name: string; mine: boolean; active: boolean; turnSeconds: number; over: boolean; board: number[] }) {
   const entry = game.showdown.find((s) => s.seat === player.seat);
-  const classes = ["pk-player", mine ? "pk-player--mine" : "", active ? "pk-player--active" : "", player.folded ? "pk-player--folded" : "", entry?.won ? "pk-player--winner" : ""].filter(Boolean).join(" ");
+  const classes = ["pk-player", mine ? "pk-player--mine" : "", active ? "pk-player--active" : "", player.folded || player.out ? "pk-player--folded" : "", entry?.won ? "pk-player--winner" : ""].filter(Boolean).join(" ");
   const shown = !mine ? player.cards : null; // las propias se ven grandes abajo
-  const status = player.folded ? "Retirado" : player.allIn ? "All-in" : active ? `Turno (${turnSeconds} s)` : "";
+  const status = player.out ? "Eliminado" : player.folded ? "Retirado" : player.allIn ? "All-in" : active ? `Turno (${turnSeconds} s)` : "";
   return (
     <li className={classes} aria-current={active ? "true" : undefined} data-testid="pk-player">
       <p className="pk-player__name">
@@ -310,7 +327,7 @@ function PlayerView({ player, game, seat, name, mine, active, turnSeconds, over,
       <p className="pk-player__stack">Pila: <strong>{formatChips(player.stack)}</strong></p>
       {player.bet > 0 && !over && <p className="pk-player__bet" aria-label={`${name} apostó ${formatChips(player.bet)} en esta ronda`}><span className="pk-chip" aria-hidden="true" />{formatChips(player.bet)}</p>}
       {status && <p className={`pk-player__state${player.allIn ? " pk-player__state--allin" : ""}`}>{status}</p>}
-      {seat?.away && !seat.isBot && !over && <p className="pk-player__state">Ausente: lo juega un bot</p>}
+      {seat?.away && !seat.isBot && !player.out && !over && <p className="pk-player__state">Ausente: no apuesta</p>}
       {!mine && (
         <div className="pk-player__cards">
           {shown

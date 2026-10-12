@@ -22,7 +22,7 @@ const seats = (overrides: Partial<Record<number, Partial<TableSeat>>> = {}): Tab
   seat(2, { isBot: true, name: "Bot 3", ...overrides[2] }),
 ];
 
-const player = (n: number, overrides: Partial<PokerPlayer> = {}): PokerPlayer => ({ seat: n, stack: 90, bet: 0, folded: false, allIn: false, acted: false, cards: null, cardCount: 2, ...overrides });
+const player = (n: number, overrides: Partial<PokerPlayer> = {}): PokerPlayer => ({ seat: n, stack: 90, bet: 0, folded: false, allIn: false, acted: false, cards: null, cardCount: 2, out: false, ...overrides });
 
 // Cartas: 12 = As de picas, 21 = 10 de corazones, 35 = Jota de diamantes, 0 = 2 de picas, 51 = As de treboles.
 const game = (overrides: Partial<PokerView> = {}): PokerView => ({
@@ -30,7 +30,8 @@ const game = (overrides: Partial<PokerView> = {}): PokerView => ({
   players: [player(0, { bet: 20 }), player(1, { stack: 80, cards: [12, 21] }), player(2, { stack: 70 })],
   dealer: 0, smallBlindSeat: 1, bigBlindSeat: 2, current: 1, currentBet: 20, toCall: 20, minRaiseTo: 40, maxRaiseTo: 80,
   actions: ["call", "fold", "raise"], showdown: [], winnings: [0, 0, 0], done: false,
-  events: [{ seat: 0, kind: "bet", amount: 20, allIn: false }], ...overrides,
+  events: [{ seat: 0, kind: "bet", amount: 20, allIn: false }],
+  handNo: 1, over: false, commitment: "c".repeat(64), handSeed: null, pots: [], ...overrides,
 });
 
 const view = (overrides: Partial<TableState<PokerView>> = {}): TableState<PokerView> => ({
@@ -41,7 +42,7 @@ const view = (overrides: Partial<TableState<PokerView>> = {}): TableState<PokerV
 function apiWith(scenario: { table: TableState<PokerView> }, extra: Record<string, (body?: unknown, headers?: Record<string, string>) => unknown> = {}): FakeApi {
   return fakeApi({
     "GET /wallet/me": () => account,
-    "GET /games/poker/rules": () => ({ minPlayers: 2, maxPlayers: 6, minBuyIn: 20, maxBuyIn: 2_000 }),
+    "GET /games/poker/rules": () => ({ minPlayers: 2, maxPlayers: 6, minBuyIn: 20, maxBuyIn: 2_000, allowsBots: false }),
     "GET /games/poker/tables": () => [mine()],
     [`GET /games/poker/tables/${TABLE_ID}`]: () => ({ ...scenario.table, serverNow: new Date().toISOString() }),
     [`POST /games/poker/tables/${TABLE_ID}/action`]: () => undefined,
@@ -51,17 +52,26 @@ function apiWith(scenario: { table: TableState<PokerView> }, extra: Record<strin
 
 const actions = (api: FakeApi) => api.calls.filter((c) => c.method === "POST" && c.path === `/games/poker/tables/${TABLE_ID}/action`);
 
-// Mano terminada con showdown: gana el asiento 0 con Doble pareja; yo (asiento 1) perdi mi entrada.
+// Partida terminada con showdown en la ultima mano: gana el asiento 0 con Doble pareja y se lleva todas las fichas; yo (asiento 1) perdi mi entrada.
 const finishedView = (overrides: Partial<TableState<PokerView>> = {}, g: Partial<PokerView> = {}): TableState<PokerView> =>
   view({
-    status: "Finished", turnSeat: null, turnEndsAt: null, serverSeed: SEED, payouts: [200, 0, 100], seats: seats({ 0: { payout: 200 }, 1: { payout: 0 } }),
+    status: "Finished", turnSeat: null, turnEndsAt: null, serverSeed: SEED, payouts: [300, 0, 0], seats: seats({ 0: { payout: 300 }, 1: { payout: 0 } }),
     game: game({
-      done: true, street: "done", current: 0, actions: [], minRaiseTo: 0, maxRaiseTo: 0, toCall: 0, pot: 200, board: [35, 0, 51, 22, 9],
-      players: [player(0, { stack: 0, cards: [10, 36] }), player(1, { stack: 0, cards: [12, 21] }), player(2, { stack: 100, folded: true })],
+      done: true, over: true, handSeed: SEED, street: "done", current: 0, actions: [], minRaiseTo: 0, maxRaiseTo: 0, toCall: 0, pot: 200, board: [35, 0, 51, 22, 9],
+      players: [player(0, { stack: 300, cards: [10, 36] }), player(1, { stack: 0, out: true, folded: true, cards: [12, 21] }), player(2, { stack: 0, out: true, folded: true })],
       showdown: [{ seat: 0, cards: [10, 36], category: "TwoPair", won: true }, { seat: 1, cards: [12, 21], category: "Pair", won: false }],
-      winnings: [200, 0, 0], events: [{ seat: 0, kind: "win_showdown", amount: 200, allIn: false }], ...g,
+      winnings: [300, 0, 0], events: [{ seat: 0, kind: "win_showdown", amount: 300, allIn: false }], ...g,
     }),
     ...overrides,
+  });
+
+// Partida terminada en la que gano el asiento 1 (yo) con un Full.
+const iWonView = (g: Partial<PokerView> = {}): TableState<PokerView> =>
+  finishedView({ payouts: [0, 300, 0], seats: seats({ 1: { payout: 300 } }) }, {
+    players: [player(0, { stack: 0, out: true, folded: true, cards: [10, 36] }), player(1, { stack: 300, cards: [12, 21] }), player(2, { stack: 0, out: true, folded: true })],
+    winnings: [0, 300, 0],
+    showdown: [{ seat: 0, cards: [10, 36], category: "Pair", won: false }, { seat: 1, cards: [12, 21], category: "FullHouse", won: true }],
+    ...g,
   });
 
 describe("Poker", () => {
@@ -228,19 +238,17 @@ describe("Poker", () => {
     const { hub } = renderApp(<Poker />, { api: apiWith(scenario) });
     await screen.findByRole("button", { name: "Igualar 20" });
 
-    scenario.table = finishedView({ payouts: [0, 250, 50], seats: seats({ 1: { payout: 250 } }) }, {
-      winnings: [0, 200, 0],
-      showdown: [{ seat: 0, cards: [10, 36], category: "Pair", won: false }, { seat: 1, cards: [12, 21], category: "FullHouse", won: true }],
-    });
+    scenario.table = iWonView();
     act(() => hub.emit("gameEvent", { game: "poker", kind: "tableChanged", data: JSON.stringify({ tableId: TABLE_ID, gameId: "poker", status: "Finished" }), at: iso(0) }));
 
     const dialog = await screen.findByRole("dialog", { name: "¡Ganaste!" });
-    expect(dialog).toHaveTextContent("250 fichas");
+    expect(dialog).toHaveTextContent("300 fichas");
     expect(dialog).toHaveTextContent("Pusiste 100");
     await userEvent.click(within(dialog).getByRole("button", { name: "Continuar" }));
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
-    expect(screen.getByTestId("pk-result")).toHaveTextContent("¡Ganaste! +150 fichas");
+    expect(screen.getByTestId("pk-result")).toHaveTextContent("¡Ganaste! +200 fichas");
     expect(screen.getByTestId("pk-result")).toHaveTextContent("Ganó Jugador 2 con Full");
+    expect(screen.getByTestId("pk-status")).toHaveTextContent("Terminó la partida: Jugador 2 se llevó todas las fichas");
   });
 
   it("says who won with what hand and how much the player lost, with the revealed hands and the winner marked", async () => {
@@ -249,29 +257,29 @@ describe("Poker", () => {
     const result = await screen.findByTestId("pk-result");
     expect(result).toHaveTextContent("Perdiste 100 fichas");
     expect(result).toHaveTextContent("Ganó Jugador 1 con Doble pareja");
-    expect(screen.getByTestId("pk-status")).toHaveTextContent("Ganó Jugador 1 con Doble pareja");
+    expect(screen.getByTestId("pk-status")).toHaveTextContent("Terminó la partida: Jugador 1 se llevó todas las fichas");
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
 
     const rows = screen.getAllByTestId("pk-showdown-row");
     expect(rows).toHaveLength(2);
     expect(rows[0]).toHaveTextContent("Jugador 1");
     expect(rows[0]).toHaveTextContent("Doble pareja");
-    expect(rows[0]).toHaveTextContent("Ganadora · +200");
+    expect(rows[0]).toHaveTextContent("Ganadora · +300");
     expect(rows[1]).toHaveTextContent("Pareja");
     expect(rows[1]).not.toHaveTextContent("Ganadora");
     expect(screen.getByRole("button", { name: "Volver a las mesas" })).toBeInTheDocument();
   });
 
   it("does not celebrate a hand that was already over when the page opened", async () => {
-    renderApp(<Poker />, { api: apiWith({ table: finishedView({ payouts: [0, 250, 50] }, { winnings: [0, 200, 0] }) }) });
+    renderApp(<Poker />, { api: apiWith({ table: iWonView() }) });
 
-    expect(await screen.findByTestId("pk-result")).toHaveTextContent("¡Ganaste! +150 fichas");
+    expect(await screen.findByTestId("pk-result")).toHaveTextContent("¡Ganaste! +200 fichas");
     await act(() => new Promise((resolve) => setTimeout(resolve, 300)));
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   });
 
   it("when everyone else folds there is no showdown and the winner is named without a hand", async () => {
-    const table = finishedView({ payouts: [0, 200, 0] }, { showdown: [], players: [player(0, { folded: true }), player(1, { stack: 0, cards: [12, 21] }), player(2, { folded: true })], winnings: [0, 200, 0] });
+    const table = iWonView({ showdown: [] });
     renderApp(<Poker />, { api: apiWith({ table }) });
 
     const result = await screen.findByTestId("pk-result");
@@ -280,7 +288,7 @@ describe("Poker", () => {
   });
 
   it("verifies in the browser that the revealed seed matches the commitment", async () => {
-    renderApp(<Poker />, { api: apiWith({ table: finishedView({ commitment: await sha256Hex(SEED) }) }) });
+    renderApp(<Poker />, { api: apiWith({ table: finishedView({}, { commitment: await sha256Hex(SEED) }) }) });
 
     await userEvent.click(await screen.findByRole("button", { name: "Verificar en mi navegador" }));
 
@@ -288,7 +296,7 @@ describe("Poker", () => {
   });
 
   it("warns when the seed does not match the commitment", async () => {
-    renderApp(<Poker />, { api: apiWith({ table: finishedView({ commitment: "0".repeat(64) }) }) });
+    renderApp(<Poker />, { api: apiWith({ table: finishedView({}, { commitment: "0".repeat(64) }) }) });
 
     await userEvent.click(await screen.findByRole("button", { name: "Verificar en mi navegador" }));
 
@@ -300,7 +308,64 @@ describe("Poker", () => {
 
     expect(await screen.findByText("c".repeat(64))).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Verificar en mi navegador" })).not.toBeInTheDocument();
-    expect(screen.getByText(/La semilla se revela cuando termina la mano/)).toBeInTheDocument();
+    expect(screen.getByText(/La semilla de esta mano se revela cuando termina/)).toBeInTheDocument();
+  });
+
+  it("between hands shows who won, the countdown to the next hand and who is out, without the action bar", async () => {
+    const table = view({
+      turnSeat: 0, turnEndsAt: iso(5_000),
+      game: game({
+        done: true, over: false, handNo: 3, street: "done", current: 0, actions: [], minRaiseTo: 0, maxRaiseTo: 0, toCall: 0, handSeed: SEED,
+        players: [player(0, { stack: 190 }), player(1, { stack: 110, cards: [12, 21] }), player(2, { stack: 0, out: true, folded: true })],
+        winnings: [190, 0, 0], events: [{ seat: 0, kind: "win", amount: 190, allIn: false }, { seat: 2, kind: "out", amount: null, allIn: false }],
+      }),
+    });
+    renderApp(<Poker />, { api: apiWith({ table }) });
+
+    expect(await screen.findByTestId("pk-status")).toHaveTextContent(/Ganó Jugador 1 · la mano 4 empieza en \d s/);
+    expect(screen.queryByTestId("pk-actions")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("pk-result")).not.toBeInTheDocument(); // la partida sigue
+    expect(screen.getAllByTestId("pk-player").find((li) => li.textContent?.includes("Bot 3"))).toHaveTextContent("Eliminado");
+    expect(screen.getByText("Bot 3 se quedó sin fichas")).toBeInTheDocument();
+    expect(screen.getByText(/Mano 3 ·/)).toBeInTheDocument();
+  });
+
+  it("lists the main pot and the side pots of the hand with who won each", async () => {
+    const table = view({
+      turnSeat: 0, turnEndsAt: iso(5_000),
+      game: game({
+        done: true, handNo: 2, street: "done", current: 0, actions: [], minRaiseTo: 0, maxRaiseTo: 0, toCall: 0, handSeed: SEED,
+        pots: [{ amount: 90, eligible: [0, 1, 2], winners: [0] }, { amount: 100, eligible: [1, 2], winners: [1] }, { amount: 120, eligible: [2], winners: [2] }],
+      }),
+    });
+    renderApp(<Poker />, { api: apiWith({ table }) });
+
+    const rows = await screen.findAllByTestId("pk-pot-row");
+    expect(rows).toHaveLength(3);
+    expect(rows[0]).toHaveTextContent("Pozo principal");
+    expect(rows[0]).toHaveTextContent("90 fichas");
+    expect(rows[0]).toHaveTextContent("Ganó Jugador 1");
+    expect(rows[1]).toHaveTextContent("Pozo lateral 1");
+    expect(rows[2]).toHaveTextContent("Vuelve a Bot 3"); // nadie se lo igualo
+  });
+
+  it("verifies each hand against its own commitment once the hand is over", async () => {
+    const commitment = await sha256Hex(SEED);
+    const table = view({ turnSeat: 0, turnEndsAt: iso(5_000), game: game({ done: true, handNo: 2, street: "done", current: 0, actions: [], handSeed: SEED, commitment }) });
+    renderApp(<Poker />, { api: apiWith({ table }) });
+
+    expect(await screen.findByRole("heading", { name: "Verificá la mano 2" })).toBeInTheDocument();
+    await userEvent.click(await screen.findByRole("button", { name: "Verificar en mi navegador" }));
+    expect(await screen.findByText(/La semilla coincide con el compromiso/)).toBeInTheDocument();
+  });
+
+  it("does not offer bots in the waiting room because Poker has none", async () => {
+    const waiting = view({ status: "Open", game: null, turnSeat: null, turnEndsAt: null, seats: [seat(0, { mine: true })], isOwner: true });
+    renderApp(<Poker />, { api: apiWith({ table: waiting }) });
+
+    expect(await screen.findByRole("button", { name: "Empezar" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Agregar bot" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Quitar bot" })).not.toBeInTheDocument();
   });
 
   it("lists the open tables of Poker when the player is not sitting anywhere", async () => {
