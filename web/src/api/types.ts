@@ -557,6 +557,8 @@ export interface UnoView {
   drawnCard: number | null;
   winner: number;
   events: UnoEvent[];
+  /** Cartas que roba quien tiene el turno si no suma otro +2 / +4 (0 = ninguna). */
+  pendingDraw: number;
 }
 
 /** La jugada propia de Uno. */

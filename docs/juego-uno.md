@@ -8,8 +8,9 @@ Un juego de cartas **entre 2 y 6 jugadores** (personas o bots): quedate sin cart
 - Se reparten **7 cartas** a cada uno y se da vuelta una (nunca un comodín: si sale, va al fondo del mazo). Empieza un asiento sorteado con la misma semilla; si la primera carta
   es de acción se aplica (salto, reversa, +2).
 - En tu turno jugás una carta del **mismo color**, del **mismo número o tipo** que la de arriba, o un **comodín** (elegís el color que manda).
-- **Salto:** el siguiente pierde el turno. **Reversa:** cambia el sentido (con 2 jugadores es otro salto). **+2:** el siguiente roba 2 y pierde el turno. **Comodín +4:** el
-  siguiente roba 4 y pierde el turno, y **solo se puede jugar sin cartas del color que manda**. No se apilan los +2/+4 y el "¡Uno!" es automático.
+- **Salto:** el siguiente pierde el turno. **Reversa:** cambia el sentido (con 2 jugadores es otro salto). **+2:** el siguiente roba 2 y pierde el turno, **salvo que responda con otro +2**: los robos se **acumulan** (2, 4, 6…) y los roba el primero que no pueda sumar otro.
+  **Comodín +4:** igual con 4 (se responde solo con otro +4, sin importar el color, y se elige el color); un +4 que abre la cadena **solo se puede jugar sin cartas del color que manda**.
+  Con un robo pendiente no se puede jugar nada más: o sumás la misma carta o robás todo lo acumulado. El "¡Uno!" es automático.
 - Sin carta para jugar **robás una**: si se puede jugar, la jugás o pasás; si no, el turno pasa solo. Si se acaba el mazo se rebaraja el descarte (menos la carta de arriba).
 - **Tenés 30 segundos por turno.** Si no jugás, robás/pasás por vos; con 3 turnos seguidos sin jugar quedás **ausente** y juega un bot por vos (la partida no se traba).
 - Gana quien se queda sin cartas y cobra `entrada x cantidad de asientos` (bots incluidos: la casa respalda lo que pone un bot).

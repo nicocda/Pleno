@@ -137,8 +137,13 @@ public sealed class UnoTests
         var after = Parse(Play(Serialize(state), 0, WildDrawFour, color: 2));
 
         Assert.Equal(2, after.TopColor);
-        Assert.Equal(5, after.Hands[1].Count); // roba 4
-        Assert.Equal(0, after.Current); // y pierde el turno: con dos jugadores vuelve a jugar el mismo
+        Assert.Equal(4, after.PendingDraw); // el rival roba 4 salvo que sume otro +4
+        Assert.Equal(1, after.Current);
+
+        var drawn = Parse(Act(Serialize(after), 1, "draw"));
+        Assert.Equal(5, drawn.Hands[1].Count);
+        Assert.Equal(0, drawn.Current); // y pierde el turno: con dos jugadores vuelve a jugar el mismo
+        Assert.Equal(0, drawn.PendingDraw);
     }
 
     [Fact]
@@ -184,8 +189,66 @@ public sealed class UnoTests
 
         var after = Parse(Play(Serialize(state), 0, RedDrawTwo));
 
-        Assert.Equal(3, after.Hands[1].Count);
-        Assert.Equal(2, after.Current);
+        Assert.Equal(2, after.PendingDraw);
+        Assert.Equal(1, after.Current); // le toca decidir: sumar otro +2 o robar
+
+        var drawn = Parse(Act(Serialize(after), 1, "draw"));
+        Assert.Equal(3, drawn.Hands[1].Count);
+        Assert.Equal(2, drawn.Current);
+        Assert.Equal(0, drawn.PendingDraw);
+    }
+
+    [Fact]
+    public void A_draw_two_can_be_answered_with_another_draw_two_and_the_penalty_accumulates()
+    {
+        var state = Blank(3);
+        state.Hands[0] = [RedDrawTwo, Green3];
+        state.Hands[1] = [RedDrawTwo + 25 /* amarillo +2 */, Blue3];
+        state.Hands[2] = [Blue3 + 1];
+
+        var one = Parse(Play(Serialize(state), 0, RedDrawTwo));
+        var two = Parse(Play(Serialize(one), 1, RedDrawTwo + 25));
+
+        Assert.Equal(4, two.PendingDraw);
+        Assert.Equal(2, two.Current);
+        Assert.Single(two.Hands[2]); // todavia no robo
+
+        var drawn = Parse(Act(Serialize(two), 2, "draw"));
+        Assert.Equal(5, drawn.Hands[2].Count);
+        Assert.Equal(0, drawn.Current);
+    }
+
+    [Fact]
+    public void With_a_pending_draw_only_the_same_kind_of_card_is_playable()
+    {
+        var state = Blank(2);
+        state.Hands[0] = [RedDrawTwo, Green3];
+        state.Hands[1] = [RedDrawTwo + 25, Red5, Wild, WildDrawFour, Green3 + 1];
+        var pending = Serialize(Parse(Play(Serialize(state), 0, RedDrawTwo)));
+
+        var view = (UnoView)Game.View(pending, 1);
+
+        Assert.Equal([RedDrawTwo + 25], view.Playable); // ni del color, ni comodin, ni +4 sobre un +2
+        Assert.Equal(2, view.PendingDraw);
+        var ex = Assert.Throws<TableRuleException>(() => Play(pending, 1, Red5));
+        Assert.Equal("illegal", ex.Code);
+    }
+
+    [Fact]
+    public void A_wild_draw_four_can_be_stacked_on_another_even_holding_cards_of_the_current_color()
+    {
+        var state = Blank(2, top: Red7);
+        state.Hands[0] = [Green3, WildDrawFour];
+        state.Hands[1] = [Red5, WildDrawFour + 1, Blue3];
+        var pending = Serialize(Parse(Play(Serialize(state), 0, WildDrawFour, color: 0)));
+
+        var view = (UnoView)Game.View(pending, 1);
+        Assert.Equal([WildDrawFour + 1], view.Playable); // tiene un 5 rojo, pero apilar un +4 no pide eso
+
+        var stacked = Parse(Play(pending, 1, WildDrawFour + 1, color: 2));
+        Assert.Equal(8, stacked.PendingDraw);
+        Assert.Equal(0, stacked.Current);
+        Assert.Equal(2, stacked.TopColor);
     }
 
     [Fact]
