@@ -213,7 +213,7 @@ describe("Blackjack", () => {
     expect(screen.queryByText(/jugador1/)).not.toBeInTheDocument();
   });
 
-  it("celebrates a win it saw resolve, with the net amount, but not an old one that was already there on entering", async () => {
+  it("celebrates a win it saw resolve, with the amount collected, but not an old one that was already there on entering", async () => {
     const playing = round({ phase: "Playing", seatCount: 1, dealer: { cards: [0], hiddenCards: 1 }, activeSeat: 1, turnEndsAt: iso(10_000) });
     const scenario: Scenario = { current: state(playing, [seat()]) };
     const { hub } = renderApp(<Blackjack />, { api: apiWith(scenario) });
@@ -224,7 +224,7 @@ describe("Blackjack", () => {
     act(() => hub.emit("gameEvent", { game: "blackjack", kind: "tableChanged", data: JSON.stringify({ tableId: "mesa-1", roundId: ROUND_ID, phase: "Finished" }), at: new Date().toISOString() }));
 
     expect(await screen.findByRole("dialog", { name: "¡Ganaste!" })).toBeInTheDocument();
-    expect(screen.getByRole("dialog")).toHaveTextContent("50 fichas");
+    expect(screen.getByRole("dialog")).toHaveTextContent("100 fichas"); // lo cobrado, no la diferencia
   });
 
   it("does not celebrate a win that was already settled when the page opened", async () => {

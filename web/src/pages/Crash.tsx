@@ -231,8 +231,8 @@ export function Crash() {
           <div className="win-modal__box" onClick={(e) => e.stopPropagation()}>
             <p className="crash-multiplier crash-multiplier--running" aria-hidden="true">{win.cashedOutAt ? formatMultiplier(win.cashedOutAt) : "🚀"}</p>
             <h2 id="win-title" className="win-modal__title">¡Ganaste!</h2>
-            <p className="win-modal__amount">{formatChips((win.payout ?? 0) - win.stake)} fichas</p>
-            <p className="muted">Apostaste {formatChips(win.stake)} y cobraste {formatChips(win.payout ?? 0)}.</p>
+            <p className="win-modal__amount">{formatChips(win.payout ?? 0)} fichas</p>
+            <p className="muted">Apostaste {formatChips(win.stake)}.</p>
             <button type="button" className="btn btn--gold" autoFocus onClick={() => setWin(null)}>
               Continuar
             </button>

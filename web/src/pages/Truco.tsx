@@ -377,8 +377,8 @@ function TrucoTable({ table, onLeave }: { table: LiveTable<TrucoView>; onLeave: 
           <div className="win-modal__box" onClick={(e) => e.stopPropagation()}>
             <p className="crash-multiplier crash-multiplier--running" aria-hidden="true">TRUCO</p>
             <h2 id="win-title" className="win-modal__title">¡Ganaste!</h2>
-            <p className="win-modal__amount">+{formatChips(net)} fichas</p>
-            <p className="muted">Pusiste {formatChips(table.buyIn)} y cobraste {formatChips(payout ?? 0)}.</p>
+            <p className="win-modal__amount">{formatChips(payout ?? 0)} fichas</p>
+            <p className="muted">Pusiste {formatChips(table.buyIn)}.</p>
             <button type="button" className="btn btn--gold" autoFocus onClick={() => setWinClosed(true)}>
               Continuar
             </button>

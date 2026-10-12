@@ -102,7 +102,7 @@ describe("Slots", () => {
     expect(spinCalls(api)[0]!.headers?.["Idempotency-Key"]).toMatch(/^[0-9a-f-]{36}$/);
 
     expect(await screen.findByRole("dialog", { name: "¡GRAN PREMIO!" })).toBeInTheDocument(); // x10
-    expect(within(screen.getByRole("dialog")).getByText(/450 fichas/)).toBeInTheDocument(); // ganancia neta: 500 - 50
+    expect(within(screen.getByRole("dialog")).getByText(/500 fichas/)).toBeInTheDocument(); // lo cobrado, no la ganancia neta
     await waitFor(() => expect(symbolsShown()).toEqual(["Limon", "Limon", "Limon"])); // ReelsView copia el modelo en un requestAnimationFrame
     expect(screen.getByTestId("reels")).toHaveAttribute("data-state", "settled");
   });
@@ -358,6 +358,6 @@ describe("Slots themes", () => {
     await userEvent.click(screen.getByRole("button", { name: /Girar por/ }));
 
     expect(await screen.findByRole("dialog", { name: "¡Ganaste!" })).toHaveClass("win-modal--win");
-    expect(screen.getByRole("dialog")).toHaveTextContent("60 fichas"); // ganancia neta: 70 - 10
+    expect(screen.getByRole("dialog")).toHaveTextContent("70 fichas"); // lo cobrado, no la ganancia neta
   });
 });

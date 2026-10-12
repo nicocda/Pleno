@@ -302,8 +302,8 @@ export function Roulette() {
           <div className="win-modal__box" onClick={(e) => e.stopPropagation()}>
             <Pocket number={winPopup.winningNumber ?? 0} size="xl" />
             <h2 id="win-title" className="win-modal__title">¡Ganaste!</h2>
-            <p className="win-modal__amount">{formatChips(netWin(winPopup))} fichas</p>
-            <p className="muted">Salió el {winPopup.winningNumber}. Apostaste {formatChips(winPopup.stake)} y cobraste {formatChips(winPopup.payout)}.</p>
+            <p className="win-modal__amount">{formatChips(winPopup.payout ?? 0)} fichas</p>
+            <p className="muted">Salió el {winPopup.winningNumber}. Apostaste {formatChips(winPopup.stake)}.</p>
             <button type="button" className="btn btn--gold" autoFocus onClick={() => setWinPopup(null)}>
               Continuar
             </button>
