@@ -34,6 +34,16 @@ public sealed class TableSeat
     public int Misses { get; set; }
 
     public bool Away { get; set; }
+
+    /// <summary>Un asiento libre de una mesa continua: nadie sentado (y no es un bot).</summary>
+    public bool IsVacant() => UserId is null && !IsBot;
+}
+
+/// <summary>Para que sirve una reserva de una mesa continua: sentarse (la entrada) o sumar fichas a la pila (una recarga).</summary>
+public enum TableBetKind
+{
+    Entry = 0,
+    TopUp = 1,
 }
 
 /// <summary>
@@ -57,6 +67,20 @@ public sealed class PlayerTable
 
     /// <summary>Lo que pone cada asiento (en fichas enteras).</summary>
     public long BuyIn { get; set; }
+
+    /// <summary>
+    /// Mesa continua (la mesa libre del Poker): arranca sola, no termina, se entra y se sale cuando se quiere y cada asiento se liquida por separado al levantarse. Los asientos son una lista de
+    /// tamaño fijo (<see cref="MaxPlayers"/>) con huecos libres.
+    /// </summary>
+    public bool Continuous { get; set; }
+
+    /// <summary>La entrada minima y maxima de una mesa continua (la pila con la que se puede estar sentado).</summary>
+    public long MinEntry { get; set; }
+
+    public long MaxEntry { get; set; }
+
+    /// <summary>La ultima vez que un jugador hizo algo en una mesa continua (entrar, jugar, recargar, salir): sirve para cerrarla cuando esta inactiva.</summary>
+    public DateTimeOffset LastActivityAt { get; set; }
 
     /// <summary>Lo que se reserva en la Wallet por asiento: la entrada mas lo que el juego sume (comision, recompras posibles). 0 en las mesas viejas: ahi es la entrada.</summary>
     public long Stake { get; set; }
@@ -113,7 +137,7 @@ public sealed class PlayerTable
     /// <summary>Lo que se reserva (y se devuelve si algo falla) por asiento.</summary>
     public long ReservedPerSeat => Stake > 0 ? Stake : BuyIn;
 
-    public int HumanCount => Seats.Count(s => !s.IsBot);
+    public int HumanCount => Seats.Count(s => s.UserId is not null);
 
     public int SeatOf(Guid userId) => Seats.FindIndex(s => s.UserId == userId);
 
@@ -139,6 +163,11 @@ public sealed class TableBet
     public Guid AccountId { get; set; }
 
     public long Stake { get; set; }
+
+    /// <summary>En una mesa continua: si esta reserva es la entrada o una recarga, y de que asiento. En las demas mesas, la entrada.</summary>
+    public TableBetKind Kind { get; set; }
+
+    public int? Seat { get; set; }
 
     public bool Reserved { get; set; }
 

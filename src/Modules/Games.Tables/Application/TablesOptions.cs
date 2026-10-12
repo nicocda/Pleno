@@ -22,6 +22,11 @@ public sealed class TablesOptions
     /// </summary>
     public int ReservationRenewSeconds { get; set; } = 600;
 
+    /// <summary>
+    /// Cuanto puede estar inactiva una mesa continua (nadie hace nada) antes de cerrarse si esta esperando jugadores o todos estan ausentes: se liquidan los asientos y se libera la mesa.
+    /// </summary>
+    public double CashIdleMinutes { get; set; } = 15;
+
     /// <summary>Cada cuanto mira el motor si hay bots que jugar o turnos vencidos.</summary>
     public int TickMilliseconds { get; set; } = 300;
 
@@ -47,6 +52,11 @@ public sealed class TablesOptions
         if (OpenTableMinutes is < 0.05 or > 1_440 || ReservationSeconds is < 60 or > 3_600)
         {
             throw new InvalidOperationException("Tables: OpenTableMinutes va de 0,05 a 1.440 y ReservationSeconds de 60 a 3.600.");
+        }
+
+        if (CashIdleMinutes is < 0.05 or > 1_440)
+        {
+            throw new InvalidOperationException("Tables: CashIdleMinutes va de 0,05 a 1.440.");
         }
 
         if (ReservationRenewSeconds < 1 || ReservationRenewSeconds >= ReservationSeconds)
