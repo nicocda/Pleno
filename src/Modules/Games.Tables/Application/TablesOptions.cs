@@ -16,6 +16,12 @@ public sealed class TablesOptions
     /// <summary>Cuanto dura la reserva de las fichas en la Wallet: tiene que alcanzar para esperar jugadores y jugar la partida entera.</summary>
     public int ReservationSeconds { get; set; } = 3_600;
 
+    /// <summary>
+    /// Cada cuanto el motor renueva las reservas de una partida en curso, para que una partida larga no pierda las fichas reservadas (la Wallet las libera sola a los <see cref="ReservationSeconds"/>).
+    /// Tiene que ser bastante menor que ese plazo. Si el motor se cae, deja de renovar y la reserva vence sola.
+    /// </summary>
+    public int ReservationRenewSeconds { get; set; } = 600;
+
     /// <summary>Cada cuanto mira el motor si hay bots que jugar o turnos vencidos.</summary>
     public int TickMilliseconds { get; set; } = 300;
 
@@ -41,6 +47,11 @@ public sealed class TablesOptions
         if (OpenTableMinutes is < 0.05 or > 1_440 || ReservationSeconds is < 60 or > 3_600)
         {
             throw new InvalidOperationException("Tables: OpenTableMinutes va de 0,05 a 1.440 y ReservationSeconds de 60 a 3.600.");
+        }
+
+        if (ReservationRenewSeconds < 1 || ReservationRenewSeconds >= ReservationSeconds)
+        {
+            throw new InvalidOperationException("Tables: ReservationRenewSeconds tiene que ser de al menos 1 y menor que ReservationSeconds (se renueva antes de que venza).");
         }
     }
 }

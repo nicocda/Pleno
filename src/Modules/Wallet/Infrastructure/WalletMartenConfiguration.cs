@@ -36,6 +36,7 @@ public static class WalletMartenConfiguration
         ]);
 
         options.Schema.For<IdempotencyRecord>().Identity(r => r.Id);
+        options.Schema.For<ReservationLease>().Identity(l => l.Id);
         options.Schema.For<AuditEntry>().Identity(e => e.Id);
         options.Schema.For<AuditEntry>().Index(e => e.OccurredAt);
         options.Schema.For<HierarchyNode>().Identity(n => n.Id);
@@ -52,6 +53,20 @@ public static class WalletMartenConfiguration
 /// Segunda barrera de idempotencia: PK unica por (cuenta, clave) en la misma transaccion que los eventos.
 /// La primera es el chequeo dentro del stream.
 /// </summary>
+/// <summary>
+/// El nuevo vencimiento de una reserva que un juego renovo. El vencimiento original es un mensaje programado al reservar (<c>ExpireReservation</c>); renovar programa otro mas adelante y guarda aca
+/// hasta cuando vale, asi el mensaje viejo, al llegar, ve que la reserva sigue vigente y no la libera. Sin documento, vale el vencimiento original.
+/// </summary>
+public sealed class ReservationLease
+{
+    /// <summary>El id de la reserva (el BetId).</summary>
+    public Guid Id { get; set; }
+
+    public Guid AccountId { get; set; }
+
+    public DateTimeOffset ExpiresAt { get; set; }
+}
+
 public sealed class IdempotencyRecord
 {
     public required string Id { get; init; }

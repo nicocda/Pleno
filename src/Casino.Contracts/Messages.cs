@@ -13,6 +13,12 @@ namespace Casino.Contracts;
 public sealed record ReserveStake(Guid BetId, Guid AccountId, long Stake, int? TtlSeconds = null, string? GameId = null);
 
 /// <summary>
+/// Un juego pide renovar el plazo de una reserva que sigue abierta: vence <paramref name="TtlSeconds"/> segundos despues de ahora. Lo usan las partidas largas (una mesa de poker) para no
+/// perder las fichas reservadas mientras siguen jugando; si el juego deja de renovar (se cayo, la mesa quedo colgada) la reserva vence sola. Renovar una reserva que ya se cerro no hace nada.
+/// </summary>
+public sealed record ExtendReservation(Guid BetId, Guid AccountId, int TtlSeconds);
+
+/// <summary>
 /// Un juego en vivo difunde un hecho a TODOS los jugadores conectados (por ejemplo, "se abrio la ronda" o "exploto el cohete").
 /// <paramref name="Data"/> es JSON propio del juego: la plataforma solo lo reenvia, no lo interpreta.
 /// </summary>

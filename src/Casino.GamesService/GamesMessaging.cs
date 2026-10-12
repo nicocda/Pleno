@@ -11,6 +11,7 @@ internal static class GamesMessaging
         // Ordenes hacia la Wallet: reservar las fichas de una apuesta y avisar el resultado para que liquide.
         options.PublishMessage<ReserveStake>().ToRabbitQueue(MessagingTopology.WalletCommandsQueue);
         options.PublishMessage<RoundResolved>().ToRabbitQueue(MessagingTopology.WalletCommandsQueue);
+        options.PublishMessage<ExtendReservation>().ToRabbitQueue(MessagingTopology.WalletCommandsQueue);
 
         // Hechos de la reserva y la liquidacion que publica la Wallet.
         options.ListenToRabbitQueue(MessagingTopology.GamesWalletEventsQueue).UseDurableInbox();

@@ -100,6 +100,9 @@ public sealed class PlayerTable
 
     public DateTimeOffset? StartedAt { get; set; }
 
+    /// <summary>La ultima vez que el motor renovo las reservas de los asientos (una partida larga no puede perder sus fichas por el plazo de la Wallet). Null si todavia no hizo falta.</summary>
+    public DateTimeOffset? ReservationsRenewedAt { get; set; }
+
     public DateTimeOffset? FinishedAt { get; set; }
 
     [Version]
