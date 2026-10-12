@@ -32,6 +32,12 @@ public sealed class UnoState
     /// <summary>La carta que acaba de robar quien tiene el turno, si se puede jugar (la juega o pasa).</summary>
     public int? DrawnCard { get; set; }
 
+    /// <summary>Las cartas que roba quien tiene el turno si no responde con otro +2 / +4 (los robos se acumulan). 0 = no hay robo pendiente.</summary>
+    public int PendingDraw { get; set; }
+
+    /// <summary>El robo pendiente viene de un comodin +4 (solo se responde con otro +4); si no, viene de un +2.</summary>
+    public bool PendingFour { get; set; }
+
     public int Winner { get; set; } = -1;
 
     /// <summary>La semilla y la mesa: hacen falta para rebarajar el descarte de forma verificable cuando se acaba el mazo.</summary>
@@ -59,7 +65,8 @@ public sealed record UnoView(
     int Direction,
     int? DrawnCard,
     int Winner,
-    IReadOnlyList<UnoEvent> Events);
+    IReadOnlyList<UnoEvent> Events,
+    int PendingDraw);
 
 /// <summary>
 /// Uno entre 2 y 6 jugadores (humanos o bots). Gana quien se queda sin cartas y se lleva todo lo que se puso en la mesa. Reglas: se juega una carta del mismo color o
@@ -229,7 +236,8 @@ public sealed class UnoGame : ITableGame
             s.Direction,
             myTurn ? s.DrawnCard : null,
             s.Winner,
-            s.Events);
+            s.Events,
+            s.PendingDraw);
     }
 
     public GameOutcome? Outcome(string state)
@@ -252,6 +260,16 @@ public sealed class UnoGame : ITableGame
         if (s.DrawnCard is not null)
         {
             throw new TableRuleException("already_drew", "Ya robaste: juga esa carta o pasa.");
+        }
+
+        if (s.PendingDraw > 0)
+        {
+            // No respondio con otro +2 / +4: roba todo lo acumulado y pierde el turno.
+            Penalize(s, seat, s.PendingDraw);
+            s.PendingDraw = 0;
+            s.PendingFour = false;
+            s.Current = Next(s, seat);
+            return;
         }
 
         var card = DrawCard(s);
@@ -289,9 +307,11 @@ public sealed class UnoGame : ITableGame
 
         if (!IsPlayable(s, hand, card))
         {
-            throw new TableRuleException("illegal", UnoCards.KindOf(card) == UnoKind.WildDrawFour
-                ? "El +4 solo se puede jugar si no tenes ninguna carta del color que manda."
-                : "Esa carta no se puede jugar sobre la de arriba.");
+            throw new TableRuleException("illegal", s.PendingDraw > 0
+                ? $"Hay {s.PendingDraw} cartas por robar: respondé con otro {(s.PendingFour ? "+4" : "+2")} o robalas."
+                : UnoCards.KindOf(card) == UnoKind.WildDrawFour
+                    ? "El +4 solo se puede jugar si no tenes ninguna carta del color que manda."
+                    : "Esa carta no se puede jugar sobre la de arriba.");
         }
 
         var wild = UnoCards.IsWild(card);
@@ -323,14 +343,14 @@ public sealed class UnoGame : ITableGame
                 s.Current = s.Seats == 2 ? seat : Next(s, seat); // con 2 jugadores la reversa es otro salto: vuelve a jugar el mismo
                 break;
             case UnoKind.DrawTwo:
-                var two = Next(s, seat);
-                Penalize(s, two, 2);
-                s.Current = Next(s, two);
+                s.PendingDraw += 2; // el siguiente roba, o suma otro +2 y se lo pasa
+                s.PendingFour = false;
+                s.Current = Next(s, seat);
                 break;
             case UnoKind.WildDrawFour:
-                var four = Next(s, seat);
-                Penalize(s, four, 4);
-                s.Current = Next(s, four);
+                s.PendingDraw += 4;
+                s.PendingFour = true;
+                s.Current = Next(s, seat);
                 break;
             default:
                 s.Current = Next(s, seat);
@@ -338,9 +358,15 @@ public sealed class UnoGame : ITableGame
         }
     }
 
-    /// <summary>Un comodin se juega siempre; un +4 solo sin cartas del color que manda; el resto, por color o por numero/tipo.</summary>
+    /// <summary>Con un robo pendiente solo se acumula la misma carta; si no, un comodin se juega siempre; un +4 solo sin cartas del color que manda; el resto, por color o por numero/tipo.</summary>
     internal static bool IsPlayable(UnoState s, List<int> hand, int card)
     {
+        if (s.PendingDraw > 0)
+        {
+            // Con un robo pendiente solo se puede sumar otra carta igual (+2 sobre +2, +4 sobre +4), sin importar el color.
+            return UnoCards.KindOf(card) == (s.PendingFour ? UnoKind.WildDrawFour : UnoKind.DrawTwo);
+        }
+
         switch (UnoCards.KindOf(card))
         {
             case UnoKind.Wild:

@@ -24,7 +24,7 @@ const seats = (overrides: Partial<Record<number, Partial<TableSeat>>> = {}): Tab
 
 const game = (overrides: Partial<UnoView> = {}): UnoView => ({
   you: 1, hand: [30, 5, 104], playable: [5, 104], players: [{ seat: 0, cards: 4 }, { seat: 1, cards: 3 }, { seat: 2, cards: 6 }], top: 8, topColor: 0, drawCount: 70, current: 1,
-  direction: 1, drawnCard: null, winner: -1, events: [], ...overrides,
+  direction: 1, drawnCard: null, winner: -1, events: [], pendingDraw: 0, ...overrides,
 });
 
 const view = (overrides: Partial<TableState<UnoView>> = {}): TableState<UnoView> => ({
@@ -69,6 +69,19 @@ describe("Uno", () => {
     expect(screen.queryByRole("button", { name: "Crear mesa" })).not.toBeInTheDocument();
   });
 
+
+  it("tells the player how many cards are coming and that a draw card can be stacked", async () => {
+    renderApp(<Uno />, { api: apiWith({ table: view({ game: game({ pendingDraw: 4, playable: [104], hand: [30, 5, 104] }) }) }) });
+
+    expect(await screen.findByTestId("uno-status")).toHaveTextContent(/Te tocan 4 cartas: sumá otra carta de robo o robalas/);
+  });
+
+  it("tells the player to draw the accumulated cards when none can be stacked", async () => {
+    renderApp(<Uno />, { api: apiWith({ table: view({ game: game({ pendingDraw: 6, playable: [] }) }) }) });
+
+    expect(await screen.findByTestId("uno-status")).toHaveTextContent(/Te tocan 6 cartas: robalas/);
+    expect(screen.getByText("¡Tocá para robar 6!")).toBeInTheDocument();
+  });
   it("highlights the playable cards and dims the rest, which cannot be clicked", async () => {
     renderApp(<Uno />, { api: apiWith({ table: view() }) });
 
