@@ -23,6 +23,8 @@ export function Board({ placed, disabled, winning, onPick, onRemove }: Props) {
   const dozens = outside.filter((s) => s.kind === "dozen");
   const columns = outside.filter((s) => s.kind === "column");
   const chances = outside.filter((s) => s.kind === "outside");
+  const halves = chances.filter((s) => s.betType === "Low" || s.betType === "High");
+  const evens = chances.filter((s) => s.betType !== "Low" && s.betType !== "High");
   const stakes = useMemo(() => new Map(placed.map((p) => [p.spot.id, p.stake])), [placed]);
   const isPlaced = (s: Spot) => stakes.has(s.id);
   const remove = (spot: Spot) => (e: React.MouseEvent) => {
@@ -91,8 +93,13 @@ export function Board({ placed, disabled, winning, onPick, onRemove }: Props) {
             <OutsideButton key={s.id} spot={s} text={`Columna ${s.selection[0]}`} on={isPlaced(s)} disabled={disabled} stake={stakes.get(s.id)} onPick={onPick} onRemove={remove} />
           ))}
         </div>
-        <div className="board__row board__row--6">
-          {chances.map((s) => (
+        <div className="board__row board__row--2">
+          {halves.map((s) => (
+            <OutsideButton key={s.id} spot={s} text={OUTSIDE_NAMES[s.betType]!} on={isPlaced(s)} disabled={disabled} stake={stakes.get(s.id)} onPick={onPick} onRemove={remove} tone={s.betType === "Red" ? "red" : s.betType === "Black" ? "black" : undefined} />
+          ))}
+        </div>
+        <div className="board__row board__row--4">
+          {evens.map((s) => (
             <OutsideButton key={s.id} spot={s} text={OUTSIDE_NAMES[s.betType]!} on={isPlaced(s)} disabled={disabled} stake={stakes.get(s.id)} onPick={onPick} onRemove={remove} tone={s.betType === "Red" ? "red" : s.betType === "Black" ? "black" : undefined} />
           ))}
         </div>
