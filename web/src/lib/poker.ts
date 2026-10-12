@@ -105,7 +105,9 @@ export function eventText(event: PokerEvent, nameOf: (seat: number) => string, b
     case "hand":
       return `Mano ${event.amount ?? 0}`;
     case "out":
-      return `${who} se quedó sin fichas`;
+      return `${who} quedó eliminado`;
+    case "rebuy":
+      return `${who} recompró`;
     case "win":
       return `${who} se llevó ${amount}`;
     case "win_showdown": {

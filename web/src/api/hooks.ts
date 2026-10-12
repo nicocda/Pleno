@@ -1,7 +1,7 @@
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useApi } from "./ApiProvider";
 import { ApiError } from "./client";
-import type { Account, Withdrawal, LoadChipsResult, CashierMe, CashierTransfer, HierarchyLevel, HierarchyNode, JurisdictionMember, CreateTableBody, TableCreated, TableRules, TableState, TableSummary, BlackjackBet, BlackjackTable, BlackjackTableState, CrashBet, CrashCashOut, CrashState, GameInfo, SlotsSettings, SlotsSettingsBody, SlotsSettingsHistoryItem, SlotsSettingsPreview, CreditFilter, CreditHistory, MovementsPage, AuditEntry, CreditResult, FairnessInfo, Me, Paytable, PlaceBetBody, PlacedBet, Round, Spin, UserSummary } from "./types";
+import type { Account, Withdrawal, LoadChipsResult, CashierMe, CashierTransfer, HierarchyLevel, HierarchyNode, JurisdictionMember, CreateTableBody, TableCreated, TableQuoteResult, TableRules, TableState, TableSummary, BlackjackBet, BlackjackTable, BlackjackTableState, CrashBet, CrashCashOut, CrashState, GameInfo, SlotsSettings, SlotsSettingsBody, SlotsSettingsHistoryItem, SlotsSettingsPreview, CreditFilter, CreditHistory, MovementsPage, AuditEntry, CreditResult, FairnessInfo, Me, Paytable, PlaceBetBody, PlacedBet, Round, Spin, UserSummary } from "./types";
 
 export const queryKeys = {
   spinsAll: ["spins"] as const,
@@ -340,6 +340,18 @@ export function useBlackjackAction() {
 export function useTableRules(gameId: string) {
   const api = useApi();
   return useQuery({ queryKey: queryKeys.tableRules(gameId), queryFn: () => api.get<TableRules>(`/games/${gameId}/rules`), staleTime: 5 * 60_000 });
+}
+
+/** Cotiza una mesa antes de crearla: lo que se reserva por asiento y el desglose (o el motivo si no es valida). */
+export function useTableQuote(gameId: string, body: CreateTableBody, enabled: boolean) {
+  const api = useApi();
+  return useQuery({
+    queryKey: ["tables", gameId, "quote", JSON.stringify(body)],
+    queryFn: () => api.post<TableQuoteResult>(`/games/${gameId}/quote`, body),
+    enabled,
+    retry: false,
+    staleTime: 30_000,
+  });
 }
 
 /** Las mesas abiertas y las propias en curso. Se refresca cada 3 s (respaldo del aviso en vivo `tableChanged`). */

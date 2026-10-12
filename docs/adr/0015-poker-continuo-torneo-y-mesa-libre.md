@@ -1,6 +1,6 @@
 # ADR 0015 - Poker continuo: torneo y mesa libre
 
-- **Estado:** propuesta (se acepta al cerrar la primera fase de implementacion)
+- **Estado:** en implementacion: fases 1 (base comun) y 2 (torneo) hechas; falta la fase 3 (mesa libre con rake)
 - **Fecha:** 2026-10-12
 
 ## Contexto
@@ -27,7 +27,9 @@ El poker de una mano **deja de existir**. Quedan dos modalidades sobre la misma 
 - **Ciegas crecientes por cantidad de manos, no por tiempo:** cada **10 manos** sube el nivel (propuesta: la ciega grande sube un 50 %, redondeada hacia arriba y a par). Asi es
   determinista, se prueba facil y una ausencia no lo altera.
 - **Recompras limitadas: 0, 1 o 2** (se elige al crear la mesa). Solo al quedarte en 0 fichas y dentro de una ventana corta (propuesta: 20 s); cuesta una entrada **mas su comision** y da
-  la pila inicial. Reserva nueva en la Wallet entre manos; si falla o no se responde, quedas eliminado.
+  la pila inicial; si no decide a tiempo, quedas eliminado. **Decision de implementacion (cambia lo previsto):** las recompras se **reservan al sentarse** (`(entrada + comision) x (1 + recompras)`) y lo que no se usa se
+  devuelve al terminar, en vez de hacer una reserva nueva entre manos. Evita reservas asincronas a mitad de partida (que podrian fallar o vencer, y trabar la mano siguiente) y deja el torneo determinista; el costo es inmovilizar
+  mas fichas al sentarse. Si se prefiere reservar en el momento, es un cambio acotado a la plataforma (una segunda `TableBet` por asiento).
 - **Termina** cuando, cerradas las ventanas de recompra, queda **un solo jugador con fichas**.
 - **Premio repartido entre los primeros** (propuesta a confirmar, por la cantidad de jugadores): 2 jugadores, todo al primero; 3 o 4, 65 % / 35 %; 5 o 6, 50 % / 30 % / 20 %. El resto
   del redondeo va al primero. Quien se va a mitad pierde su entrada; sus ciegas se pagan solas hasta que se queda sin fichas.
