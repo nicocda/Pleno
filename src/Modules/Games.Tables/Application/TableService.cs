@@ -932,7 +932,7 @@ public sealed partial class TableService(
     /// Liquida a quienes se levantaron de una mesa libre: lo que se llevan se paga contra su reserva de entrada (la primera) y las recargas, que ya estan en la pila, quedan en 0; despues el asiento queda libre.
     /// Cada asiento se liquida solo, asi que quien gano sale con mas de lo que puso y quien perdio con menos, sin esperar al resto de la mesa.
     /// </summary>
-    private async Task SettleCashOutsAsync(IDocumentSession session, IOutboxSession outboxSession, PlayerTable table, IReadOnlyList<CashOut> cashOuts, CancellationToken ct)
+    private static async Task SettleCashOutsAsync(IDocumentSession session, IOutboxSession outboxSession, PlayerTable table, IReadOnlyList<CashOut> cashOuts, CancellationToken ct)
     {
         foreach (var cashOut in cashOuts)
         {
