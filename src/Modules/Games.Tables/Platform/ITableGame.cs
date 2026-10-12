@@ -35,7 +35,10 @@ public sealed record TableOption(string Key, string Label, string Hint, string K
 /// La cotizacion de una mesa antes de crearla: cuanto se reserva por asiento (entrada, comision, recompras posibles...), las opciones ya normalizadas, un resumen corto para el listado y el
 /// desglose para mostrarle al jugador. Si lo que se pidio no es valido el juego lanza <see cref="TableRuleException"/> con el motivo.
 /// </summary>
-public sealed record TableQuote(long Stake, string? OptionsJson, string? Description, string? Breakdown);
+public sealed record TableQuote(long Stake, string? OptionsJson, string? Description, string? Breakdown, bool Continuous = false, long MinEntry = 0, long MaxEntry = 0);
+
+/// <summary>Lo que un asiento se lleva de una mesa continua al levantarse (o al cerrarse la mesa): su pila, en fichas enteras (puede ser 0). La plataforma lo liquida contra las reservas de ese asiento.</summary>
+public sealed record CashOut(int Seat, long Chips);
 
 /// <summary>Un juego que lee su propia configuracion (seccion del appsettings) al registrarse: por ejemplo la comision de la casa.</summary>
 public interface IConfigurableGame
@@ -71,6 +74,23 @@ public interface ITableGame
     /// <see cref="TableRuleException"/> si algo no es valido.
     /// </summary>
     TableQuote Quote(long buyIn, int maxPlayers, System.Text.Json.JsonElement? options) => new(buyIn, null, null, null);
+
+    // ---- Mesas continuas (la mesa libre del Poker): no terminan; se entra, se recarga y se sale cuando se quiere ----
+
+    /// <summary>Se sienta a alguien con <paramref name="chips"/> en un asiento libre (sus fichas ya estan reservadas). Si con eso hay quien juegue, arranca la mano. Lanza <see cref="TableRuleException"/> si no se puede.</summary>
+    string SeatPlayer(string state, int seat, long chips, DateTimeOffset now) => throw new NotSupportedException("Este juego no tiene mesas continuas.");
+
+    /// <summary>Suma fichas ya reservadas a quien esta sentado (una recarga). Lanza <see cref="TableRuleException"/> si no se puede (pila maxima, asiento vacio...): la plataforma devuelve entonces lo reservado.</summary>
+    string AddChips(string state, int seat, long chips, DateTimeOffset now) => throw new NotSupportedException("Este juego no tiene mesas continuas.");
+
+    /// <summary>Saca del estado a quienes se levantaron y devuelve lo que se llevan, para que la plataforma los liquide y libere el asiento.</summary>
+    (string State, IReadOnlyList<CashOut> CashOuts) DrainCashOuts(string state) => (state, []);
+
+    /// <summary>Cierra la mesa: todos los sentados se levantan con lo que tienen (y lo que pusieron en la mano en curso vuelve a su dueño).</summary>
+    string Shutdown(string state) => state;
+
+    /// <summary>Si ese asiento juega "en automatico" (se esta levantando): el motor juega por el enseguida en vez de esperar su turno.</summary>
+    bool IsPassive(string state, int seat) => false;
 
     /// <summary>Si ese asiento puede jugar ahora. Por defecto, solo el del turno; un juego puede dejar jugar fuera de turno (por ejemplo, recomprar entre manos).</summary>
     bool MayAct(string state, int seat) => Turn(state) is { } turn && turn.Seat == seat;

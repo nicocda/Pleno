@@ -17,6 +17,9 @@ public sealed class PokerRules
     /// <summary>Cuanto sube la ciega grande en cada nivel, en porcentaje (50 = x1,5).</summary>
     public int BlindGrowthPercent { get; set; } = 50;
 
+    /// <summary>El rake de la mesa libre, en milesimas del pozo (30 = 3 %). Se cobra de cada pozo que llega al flop, sin tope; lo fija la casa.</summary>
+    public int RakePermille { get; set; } = 30;
+
     /// <summary>Cuantas ciegas grandes tiene que valer la entrada como minimo y como maximo.</summary>
     public int MinEntryInBigBlinds { get; set; } = 20;
 
@@ -48,6 +51,11 @@ public sealed class PokerRules
         if (EntryFeePermille is < 0 or > 500)
         {
             throw new InvalidOperationException("Poker:EntryFeePermille tiene que estar entre 0 y 500.");
+        }
+
+        if (RakePermille is < 0 or > 200)
+        {
+            throw new InvalidOperationException("Poker:RakePermille tiene que estar entre 0 y 200.");
         }
 
         if (BlindLevelHands < 1 || BlindGrowthPercent < 1 || MinEntryInBigBlinds < 1 || MaxEntryInBigBlinds < MinEntryInBigBlinds || MaxRebuys < 0)
