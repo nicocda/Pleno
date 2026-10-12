@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Casino.Modules.Games.Fairness;
 using Casino.Modules.Games.Poker;
 using Casino.Modules.Games.Tables;
 
@@ -43,6 +44,42 @@ public sealed class PokerTests
         state.Deck = [.. board, .. state.Deck.Where(c => !board.Contains(c) && !hole.SelectMany(h => h).Contains(c))];
         return Serialize(state);
     }
+
+    /// <summary>Las fichas con las que arranco cada asiento la mano (antes de las ciegas): arma pilas desiguales.</summary>
+    private static string WithStartingStacks(string state, params long[] starting)
+    {
+        var s = Parse(state);
+        for (var i = 0; i < starting.Length; i++)
+        {
+            s.Players[i].Stack = starting[i] - s.Players[i].Bet;
+        }
+
+        return Serialize(s);
+    }
+
+    /// <summary>Le da el turno a un asiento (para controlar el orden de los all-in sin depender de donde cae el boton).</summary>
+    private static string WithTurn(string state, int seat)
+    {
+        var s = Parse(state);
+        s.Current = seat;
+        return Serialize(s);
+    }
+
+    /// <summary>Todo el mundo va all-in (o iguala si ya no puede subir) hasta que la mano termina.</summary>
+    private static string ShoveUntilDone(string state)
+    {
+        var guard = 0;
+        while (!Parse(state).Done)
+        {
+            Assert.True(++guard < 20, "la mano no termina");
+            var s = Parse(state);
+            state = PokerGame.CanRaise(s, s.Current) ? Do(state, "raise", PokerGame.RaiseLimits(s, s.Current).MaxTo) : Do(state, "call");
+        }
+
+        return state;
+    }
+
+    private static long[] Stacks(string state) => [.. Parse(state).Players.Select(p => p.Stack)];
 
     private static long Score(params int[] cards) => PokerCards.Evaluate(cards);
 
@@ -182,8 +219,12 @@ public sealed class PokerTests
             state = Do(state, "check");
         }
 
-        Assert.True(Parse(state).Done);
-        Assert.Equal(300L, Game.Outcome(state)!.Payouts.Sum());
+        var done = Parse(state);
+        Assert.True(done.Done);
+        Assert.False(done.Over); // todos siguen con fichas: la partida continua
+        Assert.Equal(300L, done.Players.Sum(p => p.Stack));
+        Assert.Null(Game.Outcome(state));
+        Assert.True(Game.Turn(state)!.Automatic); // pausa hasta la mano siguiente
     }
 
     [Fact]
@@ -234,14 +275,14 @@ public sealed class PokerTests
 
         var done = Parse(state);
         Assert.True(done.Done);
+        Assert.False(done.Over);
         Assert.Empty(done.Showdown); // nadie muestra nada
-        var payouts = Game.Outcome(state)!.Payouts;
-        Assert.Equal(300L, payouts.Sum());
-        Assert.Equal(102, payouts[start.BigBlindSeat]); // gana las ciegas: 100 - 4 + 6
-        Assert.Equal(98, payouts[start.SmallBlindSeat]); // perdio su ciega chica
-        Assert.Equal(100, payouts[(start.BigBlindSeat + 1) % 3]); // el que se retiro sin poner nada
-        Assert.Null(Game.Turn(state));
-        Assert.Equal("finished", Assert.Throws<TableRuleException>(() => Game.Apply(state, 0, """{"type":"fold"}""", DateTimeOffset.UnixEpoch)).Code);
+        var stacks = Stacks(state);
+        Assert.Equal(300L, stacks.Sum());
+        Assert.Equal(102, stacks[start.BigBlindSeat]); // gana las ciegas: 100 - 4 + 6
+        Assert.Equal(98, stacks[start.SmallBlindSeat]); // perdio su ciega chica
+        Assert.Equal(100, stacks[(start.BigBlindSeat + 1) % 3]); // el que se retiro sin poner nada
+        Assert.Equal("hand_over", Assert.Throws<TableRuleException>(() => Do(state, "fold")).Code); // entre manos solo se pasa a la siguiente
     }
 
     [Fact]
@@ -262,7 +303,10 @@ public sealed class PokerTests
         Assert.True(done.Done);
         Assert.Equal(5, done.Board.Count); // se repartio lo que faltaba
         Assert.Equal(2, done.Showdown.Count);
+        Assert.True(done.Over); // el de los reyes se quedo sin fichas: queda uno con todo
         Assert.Equal([200L, 0L], first == 0 ? Game.Outcome(state)!.Payouts : Game.Outcome(state)!.Payouts.Reverse());
+        Assert.Null(Game.Turn(state));
+        Assert.Equal("finished", Assert.Throws<TableRuleException>(() => Game.Apply(state, done.Current, """{"type":"next"}""", DateTimeOffset.UnixEpoch)).Code);
         Assert.Equal("Pair", done.Showdown.Single(x => x.Won).Category);
         Assert.Equal([C(Spades, 14), C(Hearts, 14)], done.Showdown.Single(x => x.Won).Cards);
     }
@@ -281,10 +325,11 @@ public sealed class PokerTests
         var done = Parse(state);
         Assert.True(done.Done);
         Assert.All(done.Showdown, x => Assert.True(x.Won)); // todos juegan la escalera real del tablero
-        var payouts = Game.Outcome(state)!.Payouts;
-        Assert.Equal(303L, payouts.Sum());
-        Assert.Equal(101L, payouts.Min()); // nadie gana ni pierde
-        Assert.Equal(101L, payouts.Max());
+        var stacks = Stacks(state);
+        Assert.Equal(303L, stacks.Sum());
+        Assert.Equal(101L, stacks.Min()); // nadie gana ni pierde
+        Assert.Equal(101L, stacks.Max());
+        Assert.False(done.Over);
     }
 
     [Fact]
@@ -304,11 +349,11 @@ public sealed class PokerTests
         state = Do(state, "call");
         state = Do(state, "call");
 
-        var payouts = Game.Outcome(state)!.Payouts;
-        Assert.Equal(303L, payouts.Sum());
-        Assert.Equal(152L, payouts[order[0]]); // 151 + el resto de 1: el primero a la izquierda del boton
-        Assert.Equal(151L, payouts[order[1]]);
-        Assert.Equal(0L, payouts[order[2]]);
+        var stacks = Stacks(state);
+        Assert.Equal(303L, stacks.Sum());
+        Assert.Equal(152L, stacks[order[0]]); // 151 + el resto de 1: el primero a la izquierda del boton
+        Assert.Equal(151L, stacks[order[1]]);
+        Assert.Equal(0L, stacks[order[2]]);
     }
 
     [Fact]
@@ -325,7 +370,8 @@ public sealed class PokerTests
         Assert.Empty(((PokerView)Game.View(state, null)).Hand);
 
         var json = JsonSerializer.Serialize(mine, Json);
-        Assert.DoesNotContain("seed", json, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain(Parse(state).Seed, json, StringComparison.Ordinal); // ni la semilla de la mesa...
+        Assert.Null(mine.HandSeed); // ...ni la de la mano hasta que termine
         Assert.DoesNotContain("deck", json, StringComparison.OrdinalIgnoreCase);
 
         // Al llegar al showdown las cartas de los que siguen en la mano se muestran a todos.
@@ -342,38 +388,284 @@ public sealed class PokerTests
     [InlineData(3)]
     [InlineData(4)]
     [InlineData(6)]
-    public void Bots_playing_against_bots_always_finish_a_hand_with_a_valid_payout(int seats)
+    public void Bots_playing_against_bots_always_finish_a_match_and_the_chips_are_conserved(int seats)
     {
-        for (var hand = 0; hand < 80; hand++)
+        for (var match = 0; match < 25; match++)
         {
-            var state = Game.Start(new GameStartContext(seats, $"bots-{seats}-{hand}", Guid.NewGuid(), 200, DateTimeOffset.UnixEpoch));
+            var state = Game.Start(new GameStartContext(seats, $"bots-{seats}-{match}", Guid.NewGuid(), 200, DateTimeOffset.UnixEpoch));
             var steps = 0;
             while (Game.Turn(state) is { } turn)
             {
-                Assert.True(++steps < 500, "la mano no termina");
-                state = Game.Apply(state, turn.Seat, Game.BotAction(state, turn.Seat), DateTimeOffset.UnixEpoch);
+                Assert.True(++steps < 8000, "la partida no termina");
+                var action = turn.Automatic ? Game.TimeoutAction(state, turn.Seat) : PokerBot.Choose(Parse(state), turn.Seat);
+                state = Game.Apply(state, turn.Seat, action, DateTimeOffset.UnixEpoch);
                 var s = Parse(state);
-                Assert.All(s.Players, p => Assert.True(p.Stack >= 0 && p.Total <= 200 && p.Total == 200 - p.Stack));
+                Assert.All(s.Players, p => Assert.True(p.Stack >= 0));
+                // Durante la mano las fichas estan en las pilas y en lo apostado; al terminar, los pozos ya se sumaron a las pilas.
+                Assert.Equal(200L * seats, s.Players.Sum(p => p.Stack) + (s.Done ? 0 : s.Pot));
             }
 
             var payouts = Game.Outcome(state)!.Payouts;
             Assert.Equal(200L * seats, payouts.Sum());
-            Assert.All(payouts, p => Assert.True(p >= 0));
+            Assert.Equal(1, payouts.Count(p => p > 0)); // uno se lleva todo
         }
     }
 
     [Fact]
-    public void Players_who_always_time_out_still_finish_the_hand()
+    public void Absent_players_never_bet_and_the_hands_keep_coming()
     {
         var state = StartHand(4);
-        var steps = 0;
-        while (Game.Turn(state) is { } turn)
+        var hands = 0;
+        for (var steps = 0; steps < 600 && hands < 30; steps++)
         {
-            Assert.True(++steps < 200, "la mano no termina");
-            state = Game.Apply(state, turn.Seat, Game.TimeoutAction(state, turn.Seat), DateTimeOffset.UnixEpoch);
+            var turn = Game.Turn(state);
+            Assert.NotNull(turn);
+            var action = Game.BotAction(state, turn.Seat); // lo que hace la plataforma por un asiento ausente
+            Assert.DoesNotContain("raise", action);
+            state = Game.Apply(state, turn.Seat, action, DateTimeOffset.UnixEpoch);
+            var s = Parse(state);
+            hands = s.HandNo;
+            Assert.Equal(400L, s.Players.Sum(p => p.Stack) + (s.Done ? 0 : s.Pot));
         }
 
-        Assert.Equal(400L, Game.Outcome(state)!.Payouts.Sum());
+        Assert.True(hands >= 30, "las manos siguen una tras otra");
         Assert.Equal("""{"type":"fold"}""", Game.TimeoutAction(StartHand(3), Parse(StartHand(3)).Current)); // con algo por pagar, se retira
+    }
+
+    // ---- Varias manos ----
+
+    /// <summary>Tres jugadores van all-in con 101; el tercero pierde todo (queda afuera) y la partida sigue de a dos.</summary>
+    private static string ThreeWayHandWithOneElimination()
+    {
+        var probe = Parse(StartHand(3, buyIn: 101));
+        var dealer = probe.Dealer;
+        var hole = new int[3][];
+        var order = new[] { (dealer + 1) % 3, (dealer + 2) % 3, dealer };
+        hole[order[0]] = [C(Hearts, 14), C(Clubs, 13)];
+        hole[order[1]] = [C(Diamonds, 14), C(Spades, 13)];
+        hole[order[2]] = [C(Hearts, 3), C(Clubs, 4)];
+        var state = Crafted(3, hole, [C(Spades, 2), C(Hearts, 7), C(Diamonds, 9), C(Clubs, 11), C(Spades, 5)], buyIn: 101);
+        return ShoveUntilDone(state);
+    }
+
+    [Fact]
+    public void A_player_without_chips_is_out_and_the_next_hand_is_played_without_them()
+    {
+        var done = ThreeWayHandWithOneElimination();
+        var s = Parse(done);
+        var outSeat = Array.FindIndex([.. s.Players], p => p.Stack == 0);
+        Assert.False(s.Over);
+        Assert.Contains(s.Events, e => e.Kind == "out" && e.Seat == outSeat);
+
+        var turn = Game.Turn(done)!;
+        Assert.True(turn.Automatic);
+        Assert.Equal("""{"type":"next"}""", Game.TimeoutAction(done, turn.Seat));
+        var next = Parse(Game.Apply(done, turn.Seat, Game.TimeoutAction(done, turn.Seat), DateTimeOffset.UnixEpoch));
+
+        Assert.Equal(2, next.HandNo);
+        Assert.False(next.Done);
+        Assert.True(next.Players[outSeat].Out);
+        Assert.Empty(next.Players[outSeat].Cards); // el eliminado no recibe cartas ni pone ciegas
+        Assert.DoesNotContain(outSeat, new[] { next.Dealer, next.SmallBlindSeat, next.BigBlindSeat, next.Current });
+        Assert.Equal(next.Dealer, next.SmallBlindSeat); // de a dos, el boton pone la ciega chica
+        Assert.Equal(4, next.Players.Where(p => !p.Out).SelectMany(p => p.Cards).Distinct().Count());
+        Assert.Equal(303L, next.Players.Sum(p => p.Stack + p.Total));
+    }
+
+    [Fact]
+    public void The_dealer_button_moves_to_the_next_player_with_chips_each_hand()
+    {
+        var state = StartHand(4);
+        var dealer = Parse(state).Dealer;
+        state = Do(Do(Do(state, "fold"), "fold"), "fold");
+        var turn = Game.Turn(state)!;
+        state = Game.Apply(state, turn.Seat, Game.TimeoutAction(state, turn.Seat), DateTimeOffset.UnixEpoch);
+
+        Assert.Equal((dealer + 1) % 4, Parse(state).Dealer);
+        Assert.Equal(2, Parse(state).HandNo);
+    }
+
+    [Fact]
+    public void Between_hands_only_the_next_hand_is_accepted_and_during_a_hand_it_is_not()
+    {
+        var state = StartHand(3);
+        Assert.Equal("hand_running", Assert.Throws<TableRuleException>(() => Do(state, "next")).Code);
+
+        var done = Do(Do(state, "fold"), "fold");
+        var current = Parse(done).Current;
+        Assert.Equal("hand_over", Assert.Throws<TableRuleException>(() => Game.Apply(done, current, """{"type":"raise","to":10}""", DateTimeOffset.UnixEpoch)).Code);
+        Assert.Equal("not_your_turn", Assert.Throws<TableRuleException>(() => Game.Apply(done, (current + 1) % 3, """{"type":"next"}""", DateTimeOffset.UnixEpoch)).Code);
+    }
+
+    [Fact]
+    public void Each_hand_has_its_own_seed_with_a_commitment_published_before_dealing_and_revealed_at_the_end()
+    {
+        var first = StartHand(3);
+        var view1 = (PokerView)Game.View(first, 0);
+        Assert.Null(view1.HandSeed); // todavia no se revela
+        Assert.Equal(1, view1.HandNo);
+
+        var done = Do(Do(first, "fold"), "fold");
+        var revealed = (PokerView)Game.View(done, 0);
+        Assert.NotNull(revealed.HandSeed);
+        Assert.True(ProvablyFair.MatchesCommitment(revealed.HandSeed!, view1.Commitment)); // la semilla revelada es la que se comprometio
+        Assert.Equal(view1.Commitment, revealed.Commitment);
+
+        var turn = Game.Turn(done)!;
+        var second = Game.Apply(done, turn.Seat, Game.TimeoutAction(done, turn.Seat), DateTimeOffset.UnixEpoch);
+        var view2 = (PokerView)Game.View(second, 0);
+        Assert.Equal(2, view2.HandNo);
+        Assert.NotEqual(view1.Commitment, view2.Commitment); // otra mano, otra semilla
+        Assert.NotEqual(Parse(first).Players[0].Cards, Parse(second).Players[0].Cards);
+
+        // La semilla de cada mano sale de la de la mesa: con la de la mesa revelada se recalcula todo.
+        var table = Parse(first);
+        Assert.Equal(revealed.HandSeed, PokerGame.HandSeed(table.Seed, table.TableId, 1));
+        Assert.NotEqual(PokerGame.HandSeed(table.Seed, table.TableId, 1), PokerGame.HandSeed(table.Seed, table.TableId, 2));
+    }
+
+    [Fact]
+    public void A_hand_where_the_blinds_leave_nobody_able_to_decide_runs_out_to_the_showdown()
+    {
+        // Mano de dos con 1 y 2 fichas: las dos ciegas dejan a ambos all-in y las cartas salen solas.
+        var done = Do(Do(StartHand(3), "fold"), "fold");
+        var s = Parse(done);
+        s.Players[0].Stack = 0;
+        s.Players[1].Stack = 1;
+        s.Players[2].Stack = 2;
+        var turn = Game.Turn(Serialize(s))!;
+
+        var next = Parse(Game.Apply(Serialize(s), turn.Seat, Game.TimeoutAction(Serialize(s), turn.Seat), DateTimeOffset.UnixEpoch));
+
+        Assert.True(next.Done);
+        Assert.Equal(5, next.Board.Count);
+        Assert.Equal(3L, next.Players.Sum(p => p.Stack));
+    }
+
+    // ---- Pozos laterales ----
+
+    [Fact]
+    public void An_all_in_for_less_builds_a_side_pot_and_each_pot_goes_to_the_best_hand_among_those_who_reached_it()
+    {
+        // Tres jugadores con 30, 80 y 200. El corto tiene la mejor mano, el mediano la segunda y el largo la peor; el largo abre y los otros igualan all-in.
+        int[][] hole =
+        [
+            [C(Spades, 14), C(Hearts, 14)], // el corto: ases
+            [C(Spades, 13), C(Hearts, 13)], // el mediano: reyes
+            [C(Spades, 12), C(Hearts, 12)], // el largo: damas
+        ];
+        var state = Crafted(3, hole, [C(Clubs, 2), C(Diamonds, 7), C(Clubs, 9), C(Diamonds, 3), C(Clubs, 4)]);
+        state = WithTurn(WithStartingStacks(state, 30, 80, 200), 2);
+
+        var done = Parse(ShoveUntilDone(state));
+
+        Assert.Equal([90L, 100L, 120L], done.Pots.Select(p => p.Amount)); // principal 3 x 30, lateral 2 x 50 y lo que nadie le igualo al largo
+        Assert.Equal([[0, 1, 2], [1, 2], [2]], done.Pots.Select(p => p.Eligible));
+        Assert.Equal([[0], [1], [2]], done.Pots.Select(p => p.Winners));
+        Assert.Equal([90L, 100L, 120L], done.Players.Select(p => p.Stack));
+        Assert.False(done.Over);
+    }
+
+    [Fact]
+    public void The_short_stack_with_the_best_hand_wins_only_the_main_pot()
+    {
+        int[][] hole =
+        [
+            [C(Spades, 14), C(Hearts, 14)], // el corto: ases
+            [C(Spades, 12), C(Hearts, 12)], // el mediano: damas
+            [C(Spades, 13), C(Hearts, 13)], // el largo: reyes
+        ];
+        var state = Crafted(3, hole, [C(Clubs, 2), C(Diamonds, 7), C(Clubs, 9), C(Diamonds, 3), C(Clubs, 4)]);
+        state = WithTurn(WithStartingStacks(state, 30, 80, 200), 2);
+
+        var done = Parse(ShoveUntilDone(state));
+
+        Assert.Equal([90L, 0L, 220L], done.Players.Select(p => p.Stack)); // los ases cobran el principal; el lateral y lo que nadie igualo son del largo
+        Assert.False(done.Over);
+        Assert.True(done.Players[1].Stack == 0 && !done.Players[1].Out); // el mediano se quedo sin fichas: afuera desde la mano siguiente
+    }
+
+    [Fact]
+    public void The_worst_hand_for_the_big_stack_leaves_only_the_big_stack_with_chips()
+    {
+        int[][] hole =
+        [
+            [C(Hearts, 3), C(Clubs, 4)],
+            [C(Spades, 13), C(Hearts, 13)],
+            [C(Spades, 14), C(Hearts, 14)],
+        ];
+        var state = Crafted(3, hole, [C(Clubs, 2), C(Diamonds, 7), C(Clubs, 9), C(Diamonds, 11), C(Clubs, 5)]);
+        state = WithTurn(WithStartingStacks(state, 30, 80, 200), 2);
+
+        var done = Parse(ShoveUntilDone(state));
+
+        Assert.Equal([0L, 0L, 310L], done.Players.Select(p => p.Stack));
+        Assert.True(done.Over);
+        Assert.Equal([0L, 0L, 310L], Game.Outcome(Serialize(done))!.Payouts);
+    }
+
+    [Fact]
+    public void The_pots_add_up_to_everything_that_was_put_in_even_when_a_player_folds()
+    {
+        var state = StartHand(3);
+        state = Do(state, "raise", 60);
+        state = Do(state, "fold");
+        state = Do(state, "call");
+        Assert.Equal(300L, Parse(state).Players.Sum(p => p.Stack) + Parse(state).Pot);
+
+        while (!Parse(state).Done)
+        {
+            state = Do(state, "check"); // los dos que quedan pasan hasta el showdown
+        }
+
+        var done = Parse(state);
+        Assert.Equal(300L, done.Players.Sum(p => p.Stack));
+        Assert.Equal(done.Pot, done.Pots.Sum(p => p.Amount));
+    }
+
+    [Fact]
+    public void Pots_are_built_by_level_counting_what_folded_players_put_in()
+    {
+        var state = new PokerState { Seats = 4, Players = [new PokerPlayer { Total = 10, Folded = true }, new PokerPlayer { Total = 30 }, new PokerPlayer { Total = 50 }, new PokerPlayer { Total = 50 }] };
+
+        var pots = PokerGame.BuildPots(state);
+
+        Assert.Equal([100L, 40L], pots.Select(p => p.Amount)); // 10 + 30 + 30 + 30 y 20 + 20
+        Assert.Equal([[1, 2, 3], [2, 3]], pots.Select(p => p.Eligible));
+        Assert.Equal(140L, pots.Sum(p => p.Amount));
+    }
+
+    [Fact]
+    public void What_a_folded_player_put_in_above_the_top_level_goes_to_the_last_pot()
+    {
+        var state = new PokerState { Seats = 3, Players = [new PokerPlayer { Total = 60, Folded = true }, new PokerPlayer { Total = 30 }, new PokerPlayer { Total = 40 }] };
+
+        var pots = PokerGame.BuildPots(state);
+
+        Assert.Equal([90L, 40L], pots.Select(p => p.Amount));
+        Assert.Equal(130L, pots.Sum(p => p.Amount)); // todo lo que se puso (60 + 30 + 40) queda en algun pozo
+    }
+
+    [Fact]
+    public void Nobody_can_raise_when_everyone_else_is_all_in()
+    {
+        // El primero va all-in por poco; el segundo (con muchas fichas) solo puede igualar o retirarse, no subir.
+        var state = StartHand(2);
+        var first = Parse(state).Current;
+        var s = Parse(state);
+        s.Players[first].Stack = 6; // le quedan 6 fichas (all-in corto)
+        state = Serialize(s);
+
+        state = Do(state, "raise", Parse(state).Players[first].Bet + 6); // all-in
+        var view = (PokerView)Game.View(state, Parse(state).Current);
+
+        Assert.DoesNotContain("raise", view.Actions);
+        Assert.Equal("cannot_raise", Assert.Throws<TableRuleException>(() => Do(state, "raise", 50)).Code);
+    }
+
+    [Fact]
+    public void Poker_has_no_bots()
+    {
+        Assert.False(Game.AllowsBots);
     }
 }

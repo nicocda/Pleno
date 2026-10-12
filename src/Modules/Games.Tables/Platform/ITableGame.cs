@@ -15,8 +15,11 @@ public sealed class TableRuleException(string code, string message) : Exception(
 /// <param name="BuyIn">Lo que puso cada asiento.</param>
 public sealed record GameStartContext(int Seats, string Seed, Guid TableId, long BuyIn, DateTimeOffset Now);
 
-/// <summary>A quien le toca y cuanto tiene para decidir.</summary>
-public sealed record TurnInfo(int Seat, double Seconds);
+/// <summary>
+/// A quien le toca y cuanto tiene para decidir. <paramref name="Automatic"/> marca una pausa del propio juego (por ejemplo entre dos manos de poker): cuando vence, el motor juega
+/// <see cref="ITableGame.TimeoutAction"/> sin contarle una falta al asiento ni dejar que "juegue un bot".
+/// </summary>
+public sealed record TurnInfo(int Seat, double Seconds, bool Automatic = false);
 
 /// <summary>El resultado final: lo que se lleva cada asiento (en fichas enteras). La suma tiene que ser igual a lo que se puso entre todos.</summary>
 public sealed record GameOutcome(IReadOnlyList<long> Payouts);
@@ -37,6 +40,9 @@ public interface ITableGame
     long MinBuyIn { get; }
 
     long MaxBuyIn { get; }
+
+    /// <summary>Si el dueño puede sumar bots a la mesa. Un juego donde la casa no quiere poner fichas (poker) lo apaga: quien se ausenta no apuesta, pasa o se retira.</summary>
+    bool AllowsBots => true;
 
     /// <summary>Arma la partida (reparte, baraja con la semilla...) y devuelve el estado inicial.</summary>
     string Start(GameStartContext context);

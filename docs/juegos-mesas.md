@@ -8,7 +8,9 @@ sus reglas. Complementa al [contrato de juegos](juegos-contrato.md) (y a las mes
 - **Fichas:** cada asiento humano es una apuesta del protocolo de rondas con la Wallet (reserva al sentarse, liquida con lo que se llevó); salir antes de empezar, cancelar o una reserva
   tardía devuelven lo apostado. Los pagos del juego tienen que sumar lo puesto entre todos (bots incluidos).
 - **Turnos y tiempos:** el turno tiene un límite (lo define el juego); si vence, juega el turno de "no actuó"; con 3 vencidos seguidos el asiento queda ausente y juega un bot.
-- **Bots:** el motor los juega con la jugada que da el juego (`BotAction`); no reservan fichas (la casa los respalda).
+  Un juego puede marcar un turno como **automático** (`TurnInfo.Automatic`, por ejemplo la pausa entre manos del Poker): al vencer el motor juega `TimeoutAction` sin contarle una falta a nadie.
+- **Bots:** el motor los juega con la jugada que da el juego (`BotAction`); no reservan fichas (la casa los respalda). Un juego puede **no tenerlos** (`ITableGame.AllowsBots`, el Poker): la
+  API rechaza sumarlos, `GET /games/{id}/rules` lo informa (`allowsBots`) y `BotAction` solo se usa para un asiento ausente.
 - **Provably fair:** semilla al crear la mesa, compromiso público desde el principio, revelada al terminar; `FairShuffle` baraja con HMAC-SHA256.
 - **Tiempo real:** `GameBroadcast` `tableChanged` (sin datos); el navegador vuelve a pedir su vista. Nadie ve la identidad de otro (solo "Jugador N" / "Bot N").
 - **Endpoints** comunes bajo `/games/{id}`: `rules`, `tables` (GET/POST), `tables/{id}` (GET), `join`, `leave`, `bots` (POST/DELETE), `start`, `action`, `history`.

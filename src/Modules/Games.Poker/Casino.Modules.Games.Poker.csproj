@@ -11,6 +11,10 @@
   </ItemGroup>
 
   <ItemGroup>
+    <InternalsVisibleTo Include="Casino.Games.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="..\Games.Tables\Casino.Modules.Games.Tables.csproj" />
   </ItemGroup>
 
