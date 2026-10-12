@@ -38,6 +38,18 @@ public sealed class PokerPlayer
 
     /// <summary>Ya actuo desde la ultima subida (la ronda termina cuando todos actuaron y las apuestas se igualaron).</summary>
     public bool Acted { get; set; }
+
+    /// <summary>Cuantas recompras uso.</summary>
+    public int RebuysUsed { get; set; }
+
+    /// <summary>La pila con la que arranco la mano (desempata quien queda mejor ubicado cuando se eliminan dos en la misma mano).</summary>
+    public long StartStack { get; set; }
+
+    /// <summary>Se quedo sin fichas, le quedan recompras y tiene que decidir si recompra o no (hasta que vence la pausa).</summary>
+    public bool AwaitingRebuy { get; set; }
+
+    /// <summary>Ya tiene su lugar en el ranking de eliminados.</summary>
+    public bool Ranked { get; set; }
 }
 
 /// <summary>
@@ -50,9 +62,34 @@ public sealed class PokerState
 
     public long BuyIn { get; set; }
 
+    /// <summary>La ciega chica de la mano en curso (la mitad de la grande).</summary>
     public long SmallBlind { get; set; }
 
+    /// <summary>La ciega grande de la mano en curso: sube cada <see cref="LevelHands"/> manos.</summary>
     public long BigBlind { get; set; }
+
+    /// <summary>La ciega grande con la que arranco la mesa.</summary>
+    public long BigBlind0 { get; set; }
+
+    /// <summary>Cada cuantas manos sube el nivel y cuanto (porcentaje): se guardan al crear la mesa.</summary>
+    public int LevelHands { get; set; } = 10;
+
+    public int GrowthPercent { get; set; } = 50;
+
+    /// <summary>La comision de la casa por cada entrada (la inicial y cada recompra). No entra al premio.</summary>
+    public long Fee { get; set; }
+
+    /// <summary>Cuantas recompras permite la mesa por jugador.</summary>
+    public int Rebuys { get; set; }
+
+    /// <summary>Cuantas recompras se hicieron en total (cada una suma una entrada al premio).</summary>
+    public int RebuyCount { get; set; }
+
+    /// <summary>Cuanto dura la pausa hasta la mano siguiente (mas larga si alguien puede recomprar).</summary>
+    public double PauseSeconds { get; set; }
+
+    /// <summary>Los asientos eliminados, del primero al ultimo en irse: ordena el ranking.</summary>
+    public List<int> Eliminated { get; set; } = [];
 
     public int Dealer { get; set; }
 
@@ -101,9 +138,15 @@ public sealed class PokerState
     public List<PokerEvent> Events { get; set; } = [];
 
     public long Pot => Players.Sum(p => p.Total);
+
+    /// <summary>Lo que se reparte entre los primeros: una entrada por cada asiento y por cada recompra (sin la comision).</summary>
+    public long PrizePool => BuyIn * (Seats + RebuyCount);
+
+    /// <summary>Cuantas manos faltan para que suba el nivel de ciegas (contando la mano en curso).</summary>
+    public int HandsToNextLevel() => LevelHands - ((HandNo - 1) % LevelHands);
 }
 
-public sealed record PokerPlayerView(int Seat, long Stack, long Bet, bool Folded, bool AllIn, bool Acted, IReadOnlyList<int>? Cards, int CardCount, bool Out);
+public sealed record PokerPlayerView(int Seat, long Stack, long Bet, bool Folded, bool AllIn, bool Acted, IReadOnlyList<int>? Cards, int CardCount, bool Out, int RebuysLeft, bool AwaitingRebuy);
 
 /// <summary>Lo que ve un asiento: sus cartas, las comunitarias, el pozo, que debe pagar y que puede hacer (con los limites de una subida). Nunca las cartas de otros antes del showdown.</summary>
 public sealed record PokerView(
@@ -130,18 +173,34 @@ public sealed record PokerView(
     bool Over,
     string Commitment,
     string? HandSeed,
-    IReadOnlyList<PokerPot> Pots);
+    IReadOnlyList<PokerPot> Pots,
+    long SmallBlind,
+    long BigBlind,
+    long NextBigBlind,
+    int HandsToNextLevel,
+    int Rebuys,
+    long Entry,
+    long Fee,
+    long PrizePool,
+    IReadOnlyList<long> Prizes,
+    IReadOnlyList<int> Ranking);
 
 /// <summary>
 /// Texas Hold'em de 2 a 6 jugadores, mano tras mano: cada uno entra con la misma cantidad de fichas y se juegan manos completas (cuatro rondas de apuestas con ciegas y limite libre) hasta
 /// que queda un solo jugador con fichas, que se lleva todo lo puesto. Como las pilas cambian de una mano a otra, un all-in por menos que los demas arma pozos laterales. Sin bots: quien se
 /// ausenta pasa (si es gratis) o se retira. Cada mano tiene su propia semilla, derivada de la de la mesa, con su compromiso publicado antes de repartir y revelada al terminar la mano.
 /// </summary>
-public sealed class PokerGame : ITableGame
+public sealed class PokerGame : ITableGame, IConfigurableGame
 {
     private const double TurnSeconds = 30;
-    private const double BetweenHandsSeconds = 6;
     private const int MaxEvents = 24;
+
+    private static readonly JsonSerializerOptions OptionsJson = new(JsonSerializerDefaults.Web);
+
+    private PokerRules _rules = new();
+
+    /// <summary>Lo que la casa fija para todas las mesas (comision, niveles, pausas).</summary>
+    public void Configure(Microsoft.Extensions.Configuration.IConfiguration configuration) => _rules = PokerRules.Load(configuration);
 
     public GameInfo Info { get; } = new("poker", "Poker", "Texas Hold'em por manos: ciegas, flop, turn y river, hasta que queda uno con todas las fichas. De 2 a 6 jugadores.", "/poker", "P");
 
@@ -149,24 +208,96 @@ public sealed class PokerGame : ITableGame
 
     public int MaxPlayers => 6;
 
-    public long MinBuyIn => 20;
+    public long MinBuyIn => 40;
 
     public long MaxBuyIn => 2_000;
 
     public bool AllowsBots => false;
+
+    public IReadOnlyList<TableOption> Options { get; } =
+    [
+        new("bigBlind", "Ciega grande", "La ciega chica es la mitad. La entrada tiene que valer entre 20 y 100 ciegas grandes y las ciegas suben solas cada 10 manos.", "number", Min: 2),
+        new("rebuys", "Recompras", "Cuántas veces puede volver a entrar quien se queda sin fichas (cuesta una entrada más su comisión). Lo que reservás de más se devuelve si no lo usás.", "choice", Choices: [0, 1, 2], Default: 0),
+    ];
+
+    /// <summary>Lo que se elige al crear la mesa, ya validado: las ciegas, las recompras y lo que fija la casa (comision, niveles), que queda guardado en la mesa.</summary>
+    private sealed record PokerTableOptions(long BigBlind, int Rebuys, long Fee, int LevelHands, int GrowthPercent);
+
+    private static long DefaultBigBlind(long buyIn) => 2 * Math.Max(1, buyIn / 50);
+
+    public TableQuote Quote(long buyIn, int maxPlayers, JsonElement? options)
+    {
+        var bigBlind = DefaultBigBlind(buyIn);
+        var rebuys = 0;
+        if (options is { ValueKind: JsonValueKind.Object } o)
+        {
+            if (o.TryGetProperty("bigBlind", out var bb) && bb.ValueKind != JsonValueKind.Null)
+            {
+                bigBlind = bb.ValueKind == JsonValueKind.Number && bb.TryGetInt64(out var v) ? v : throw new TableRuleException("bad_option", "La ciega grande tiene que ser un numero entero.");
+            }
+
+            if (o.TryGetProperty("rebuys", out var rb) && rb.ValueKind != JsonValueKind.Null)
+            {
+                rebuys = rb.ValueKind == JsonValueKind.Number && rb.TryGetInt32(out var v) ? v : throw new TableRuleException("bad_option", "Las recompras tienen que ser un numero entero.");
+            }
+        }
+
+        if (bigBlind < 2 || bigBlind % 2 != 0)
+        {
+            throw new TableRuleException("bad_blind", "La ciega grande tiene que ser par y de 2 o mas (la chica es la mitad).");
+        }
+
+        if (buyIn < bigBlind * _rules.MinEntryInBigBlinds || buyIn > bigBlind * _rules.MaxEntryInBigBlinds)
+        {
+            throw new TableRuleException("bad_blind", $"Con una entrada de {buyIn} la ciega grande tiene que estar entre {Math.Max(2, (buyIn + _rules.MaxEntryInBigBlinds - 1) / _rules.MaxEntryInBigBlinds)} y {buyIn / _rules.MinEntryInBigBlinds} (la entrada vale entre {_rules.MinEntryInBigBlinds} y {_rules.MaxEntryInBigBlinds} ciegas grandes).");
+        }
+
+        if (rebuys < 0 || rebuys > _rules.MaxRebuys)
+        {
+            throw new TableRuleException("bad_rebuys", $"Las recompras van de 0 a {_rules.MaxRebuys}.");
+        }
+
+        var fee = buyIn * _rules.EntryFeePermille / 1000;
+        var entries = 1 + rebuys;
+        var stake = (buyIn + fee) * entries;
+        var chosen = new PokerTableOptions(bigBlind, rebuys, fee, _rules.BlindLevelHands, _rules.BlindGrowthPercent);
+        var description = $"Ciegas {bigBlind / 2}/{bigBlind} (suben cada {_rules.BlindLevelHands} manos) · {(rebuys == 0 ? "sin recompras" : rebuys == 1 ? "1 recompra" : $"{rebuys} recompras")}";
+        var breakdown = rebuys == 0
+            ? $"Se reservan {stake} fichas: la entrada de {buyIn} más {fee} de comisión."
+            : $"Se reservan {stake} fichas: {entries} entradas posibles de {buyIn} más {fee} de comisión cada una. Las que no uses se te devuelven al terminar.";
+        return new TableQuote(stake, JsonSerializer.Serialize(chosen, OptionsJson), description, breakdown);
+    }
+
+    /// <summary>Puede decidir la recompra aunque no sea su turno: cualquiera que se quedo sin fichas y todavia no decidio, durante la pausa.</summary>
+    public bool MayAct(string state, int seat)
+    {
+        var s = Deserialize(state);
+        if (s.Over)
+        {
+            return false;
+        }
+
+        return s.Done ? seat == s.Current || s.Players[seat].AwaitingRebuy : seat == s.Current;
+    }
 
     public string Start(GameStartContext context)
     {
         ArgumentNullException.ThrowIfNull(context);
 
         var n = context.Seats;
-        var small = Math.Max(1, context.BuyIn / 50);
+        var chosen = context.Options is null
+            ? new PokerTableOptions(DefaultBigBlind(context.BuyIn), 0, 0, _rules.BlindLevelHands, _rules.BlindGrowthPercent)
+            : JsonSerializer.Deserialize<PokerTableOptions>(context.Options, OptionsJson)!;
         var state = new PokerState
         {
             Seats = n,
             BuyIn = context.BuyIn,
-            SmallBlind = small,
-            BigBlind = small * 2,
+            BigBlind0 = chosen.BigBlind,
+            Fee = chosen.Fee,
+            Rebuys = chosen.Rebuys,
+            LevelHands = chosen.LevelHands,
+            GrowthPercent = chosen.GrowthPercent,
+            PauseSeconds = _rules.BetweenHandsSeconds,
             Seed = context.Seed,
             TableId = context.TableId.ToString("N"),
             Winnings = [.. Enumerable.Repeat(0L, n)],
@@ -180,6 +311,25 @@ public sealed class PokerGame : ITableGame
         return Serialize(state);
     }
 
+    /// <summary>La ciega grande de la mano <paramref name="handNo"/>: sube <paramref name="growthPercent"/> % cada <paramref name="levelHands"/> manos (redondeada hacia arriba y a par).</summary>
+    internal static long BigBlindAt(long bigBlind0, int handNo, int levelHands, int growthPercent)
+    {
+        var level = (handNo - 1) / Math.Max(1, levelHands);
+        var bb = bigBlind0;
+        for (var i = 0; i < level; i++)
+        {
+            var next = ((bb * (100 + growthPercent)) + 99) / 100;
+            if (next % 2 != 0)
+            {
+                next++;
+            }
+
+            bb = Math.Max(next, bb + 2);
+        }
+
+        return bb;
+    }
+
     /// <summary>La semilla de la mano <paramref name="handNo"/>: HMAC-SHA256 con la semilla de la mesa (hex en minuscula). Su compromiso se publica antes de repartir; se revela al terminar la mano.</summary>
     internal static string HandSeed(string tableSeed, string tableId, int handNo) =>
         Convert.ToHexStringLower(HMACSHA256.HashData(Encoding.UTF8.GetBytes(tableSeed), Encoding.UTF8.GetBytes($"poker:{tableId}:hand:{handNo}")));
@@ -188,7 +338,7 @@ public sealed class PokerGame : ITableGame
     /// Arma la mano <paramref name="handNo"/> con las pilas actuales: quienes no tienen fichas quedan afuera, el boton rota, se baraja con la semilla de la mano, se reparten las cartas
     /// (primera carta del k-esimo jugador en la posicion k, segunda en m + k, con m jugadores activos), se ponen las ciegas y se decide quien juega.
     /// </summary>
-    private static void StartHand(PokerState s, int handNo)
+    private void StartHand(PokerState s, int handNo)
     {
         s.HandNo = handNo;
         s.Done = false;
@@ -204,9 +354,14 @@ public sealed class PokerGame : ITableGame
             p.Acted = false;
             p.AllIn = false;
             p.Cards = [];
-            p.Out = p.Stack <= 0;
+            p.AwaitingRebuy = false;
+            p.Out = p.Out || p.Stack <= 0;
             p.Folded = p.Out;
+            p.StartStack = p.Stack;
         }
+
+        s.BigBlind = BigBlindAt(s.BigBlind0, handNo, s.LevelHands, s.GrowthPercent);
+        s.SmallBlind = s.BigBlind / 2;
 
         var active = Enumerable.Range(0, s.Seats).Where(i => !s.Players[i].Out).ToList();
         var m = active.Count;
@@ -248,7 +403,7 @@ public sealed class PokerGame : ITableGame
             return null;
         }
 
-        return s.Done ? new TurnInfo(s.Current, BetweenHandsSeconds, Automatic: true) : new TurnInfo(s.Current, TurnSeconds);
+        return s.Done ? new TurnInfo(s.Current, s.PauseSeconds > 0 ? s.PauseSeconds : _rules.BetweenHandsSeconds, Automatic: true) : new TurnInfo(s.Current, TurnSeconds);
     }
 
     public string Apply(string state, int seat, string action, DateTimeOffset now)
@@ -259,23 +414,47 @@ public sealed class PokerGame : ITableGame
             throw new TableRuleException("finished", "La partida ya termino.");
         }
 
+        var (type, to) = ParseAction(action);
+        if (s.Done)
+        {
+            // Entre manos: quien se quedo sin fichas decide si recompra; la pausa vencida (o quien tiene el turno) pasa a la mano siguiente.
+            switch (type)
+            {
+                case "rebuy":
+                    Rebuy(s, seat);
+                    break;
+                case "decline":
+                    Decline(s, seat);
+                    break;
+                case "next":
+                    if (seat != s.Current)
+                    {
+                        throw new TableRuleException("not_your_turn", "No es tu turno.");
+                    }
+
+                    ResolvePending(s);
+                    if (!s.Over)
+                    {
+                        StartHand(s, s.HandNo + 1);
+                    }
+
+                    break;
+                default:
+                    throw new TableRuleException("hand_over", "La mano ya termino: espera la siguiente.");
+            }
+
+            TrimEvents(s);
+            return Serialize(s);
+        }
+
         if (seat != s.Current)
         {
             throw new TableRuleException("not_your_turn", "No es tu turno.");
         }
 
-        var (type, to) = ParseAction(action);
-        if (s.Done)
+        if (type is "rebuy" or "decline")
         {
-            // Entre manos solo se acepta pasar a la siguiente (la pausa vencio, o el dueño del turno no quiso esperar).
-            if (type != "next")
-            {
-                throw new TableRuleException("hand_over", "La mano ya termino: espera la siguiente.");
-            }
-
-            StartHand(s, s.HandNo + 1);
-            TrimEvents(s);
-            return Serialize(s);
+            throw new TableRuleException("hand_running", "La mano todavia no termino.");
         }
 
         if (type == "next")
@@ -350,7 +529,9 @@ public sealed class PokerGame : ITableGame
             p.Acted,
             i == seat ? p.Cards : revealed.GetValueOrDefault(i),
             p.Cards.Count,
-            p.Out)).ToList();
+            p.Out,
+            s.Rebuys - p.RebuysUsed,
+            p.AwaitingRebuy)).ToList();
 
         var handSeed = HandSeed(s.Seed, s.TableId, s.HandNo);
         var myTurn = seat is { } who && who == s.Current && !s.Done;
@@ -370,7 +551,7 @@ public sealed class PokerGame : ITableGame
             seat is { } q ? Math.Max(0, s.CurrentBet - s.Players[q].Bet) : 0,
             minTo,
             maxTo,
-            myTurn ? Legal(s, seat!.Value) : [],
+            myTurn ? Legal(s, seat!.Value) : s is { Done: true, Over: false } && seat is { } waiting && s.Players[waiting].AwaitingRebuy ? ["decline", "rebuy"] : [],
             s.Showdown,
             s.Winnings,
             s.Done,
@@ -379,7 +560,17 @@ public sealed class PokerGame : ITableGame
             s.Over,
             ProvablyFair.Commitment(handSeed),
             s.Done ? handSeed : null,
-            s.Pots);
+            s.Pots,
+            s.SmallBlind,
+            s.BigBlind,
+            BigBlindAt(s.BigBlind0, s.HandNo + s.HandsToNextLevel(), s.LevelHands, s.GrowthPercent),
+            s.HandsToNextLevel(),
+            s.Rebuys,
+            s.BuyIn,
+            s.Fee,
+            s.PrizePool,
+            Prizes(s.PrizePool, s.Seats),
+            s.Over ? Ranking(s) : []);
     }
 
     public GameOutcome? Outcome(string state)
@@ -390,8 +581,21 @@ public sealed class PokerGame : ITableGame
             return null;
         }
 
-        // Quien se queda con todas las fichas cobra todo lo que se puso (la suma de las pilas es siempre entrada x asientos).
-        return new GameOutcome([.. s.Players.Select(p => p.Stack)]);
+        // El premio se reparte segun el lugar en el ranking (el que queda con todas las fichas es el primero) y cada uno recupera las recompras que reservo y no uso.
+        var prizes = Prizes(s.PrizePool, s.Seats);
+        var ranking = Ranking(s);
+        var payouts = new long[s.Seats];
+        for (var place = 0; place < ranking.Count; place++)
+        {
+            payouts[ranking[place]] = place < prizes.Count ? prizes[place] : 0;
+        }
+
+        for (var seat = 0; seat < s.Seats; seat++)
+        {
+            payouts[seat] += (s.Rebuys - s.Players[seat].RebuysUsed) * (s.BuyIn + s.Fee);
+        }
+
+        return new GameOutcome(payouts, HouseTake: (s.Seats + s.RebuyCount) * s.Fee);
     }
 
     // ---- Lo que se puede hacer ----
@@ -481,7 +685,7 @@ public sealed class PokerGame : ITableGame
 
     // ---- Avance de la mano ----
 
-    private static void AfterAction(PokerState s)
+    private void AfterAction(PokerState s)
     {
         var live = Enumerable.Range(0, s.Seats).Where(i => !s.Players[i].Folded).ToList();
         if (live.Count == 1)
@@ -497,7 +701,7 @@ public sealed class PokerGame : ITableGame
     /// Avanza la mano despues de una accion (o al repartir): si la ronda sigue, pasa el turno (<paramref name="moveCurrent"/>); si se cerro, da la carta que sigue y, cuando nadie mas puede
     /// apostar, reparte lo que falta hasta el showdown.
     /// </summary>
-    private static void Progress(PokerState s, bool moveCurrent)
+    private void Progress(PokerState s, bool moveCurrent)
     {
         while (true)
         {
@@ -571,7 +775,7 @@ public sealed class PokerGame : ITableGame
         s.Events.Add(new PokerEvent(-1, next));
     }
 
-    private static void Showdown(PokerState s)
+    private void Showdown(PokerState s)
     {
         var live = Enumerable.Range(0, s.Seats).Where(i => !s.Players[i].Folded).ToList();
         var scores = live.ToDictionary(i => i, i => PokerCards.Evaluate([.. s.Players[i].Cards, .. s.Board]));
@@ -582,7 +786,7 @@ public sealed class PokerGame : ITableGame
     /// Termina la mano: arma los pozos (principal y laterales), reparte cada uno entre los mejores de quienes pueden ganarlo y suma lo ganado a las pilas. Si queda un solo jugador con fichas,
     /// la partida termina; si no, quienes se quedaron sin fichas quedan afuera y empieza la pausa hasta la mano siguiente.
     /// </summary>
-    private static void Finish(PokerState s, bool showdown, Dictionary<int, long>? scores = null)
+    private void Finish(PokerState s, bool showdown, Dictionary<int, long>? scores = null)
     {
         var live = Enumerable.Range(0, s.Seats).Where(i => !s.Players[i].Folded).ToList();
         s.Pots = BuildPots(s);
@@ -623,12 +827,119 @@ public sealed class PokerGame : ITableGame
             s.Events.Add(new PokerEvent(w, showdown ? "win_showdown" : "win", s.Winnings[w]));
         }
 
+        // Quien se queda sin fichas: si le quedan recompras decide en la pausa; si no, queda afuera.
         foreach (var i in Enumerable.Range(0, s.Seats).Where(i => !s.Players[i].Out && s.Players[i].Stack == 0))
         {
-            s.Events.Add(new PokerEvent(i, "out"));
+            if (s.Players[i].RebuysUsed < s.Rebuys)
+            {
+                s.Players[i].AwaitingRebuy = true;
+            }
+            else
+            {
+                Eliminate(s, i);
+            }
         }
 
+        var waiting = s.Players.Any(p => p.AwaitingRebuy);
+        s.PauseSeconds = waiting ? _rules.RebuyWindowSeconds : _rules.BetweenHandsSeconds;
+        if (!waiting)
+        {
+            SettleRanks(s);
+            s.Over = s.Players.Count(p => p.Stack > 0) <= 1;
+        }
+    }
+
+    /// <summary>Queda afuera (sin recompras): se anota el evento; su lugar en el ranking se fija cuando se resuelven todos los de la mano (<see cref="SettleRanks"/>).</summary>
+    private static void Eliminate(PokerState s, int seat)
+    {
+        s.Players[seat].Out = true;
+        s.Players[seat].AwaitingRebuy = false;
+        s.Events.Add(new PokerEvent(seat, "out"));
+    }
+
+    /// <summary>Fija el lugar de los eliminados de esta mano: se van primero los que arrancaron con menos fichas (a igualdad, el de numero de asiento menor).</summary>
+    private static void SettleRanks(PokerState s)
+    {
+        foreach (var seat in Enumerable.Range(0, s.Seats).Where(i => s.Players[i].Out && !s.Players[i].Ranked).OrderBy(i => s.Players[i].StartStack).ThenBy(i => i))
+        {
+            s.Eliminated.Add(seat);
+            s.Players[seat].Ranked = true;
+        }
+    }
+
+    /// <summary>Decidieron todos los que podian recomprar: si queda uno solo con fichas termina la partida; si no, la pausa se acorta.</summary>
+    private void AfterDecision(PokerState s)
+    {
+        if (s.Players.Any(p => p.AwaitingRebuy))
+        {
+            return;
+        }
+
+        SettleRanks(s);
+        if (s.Players.Count(p => p.Stack > 0) <= 1)
+        {
+            s.Over = true;
+        }
+        else
+        {
+            s.PauseSeconds = _rules.AfterDecisionsSeconds;
+        }
+    }
+
+    private void Rebuy(PokerState s, int seat)
+    {
+        var p = s.Players[seat];
+        if (!p.AwaitingRebuy || p.RebuysUsed >= s.Rebuys)
+        {
+            throw new TableRuleException("cannot_rebuy", "No podes recomprar ahora.");
+        }
+
+        p.Stack = s.BuyIn;
+        p.StartStack = s.BuyIn;
+        p.RebuysUsed++;
+        p.AwaitingRebuy = false;
+        s.RebuyCount++;
+        s.Events.Add(new PokerEvent(seat, "rebuy", s.BuyIn));
+        AfterDecision(s);
+    }
+
+    private void Decline(PokerState s, int seat)
+    {
+        if (!s.Players[seat].AwaitingRebuy)
+        {
+            throw new TableRuleException("cannot_decline", "No tenes una recompra pendiente.");
+        }
+
+        Eliminate(s, seat);
+        AfterDecision(s);
+    }
+
+    /// <summary>La pausa vencio: los que no recompraron quedan afuera y, si queda uno solo con fichas, la partida termina.</summary>
+    private static void ResolvePending(PokerState s)
+    {
+        foreach (var seat in Enumerable.Range(0, s.Seats).Where(i => s.Players[i].AwaitingRebuy))
+        {
+            Eliminate(s, seat);
+        }
+
+        SettleRanks(s);
         s.Over = s.Players.Count(p => p.Stack > 0) <= 1;
+    }
+
+    /// <summary>El lugar de cada asiento al terminar: primero el que se queda con todo y despues los eliminados, del ultimo al primero en irse.</summary>
+    internal static List<int> Ranking(PokerState s)
+    {
+        var champion = Enumerable.Range(0, s.Seats).Where(i => s.Players[i].Stack > 0).OrderByDescending(i => s.Players[i].Stack).ToList();
+        return [.. champion, .. Enumerable.Reverse(s.Eliminated)];
+    }
+
+    /// <summary>El reparto del premio segun cuantos juegan: 2, todo al primero; 3 o 4, 65 % y 35 %; 5 o 6, 50 %, 30 % y 20 %. El resto del redondeo va al primero.</summary>
+    internal static List<long> Prizes(long pool, int seats)
+    {
+        int[] percents = seats <= 2 ? [100] : seats <= 4 ? [65, 35] : [50, 30, 20];
+        var prizes = percents.Select(p => pool * p / 100).ToList();
+        prizes[0] += pool - prizes.Sum();
+        return prizes;
     }
 
     /// <summary>

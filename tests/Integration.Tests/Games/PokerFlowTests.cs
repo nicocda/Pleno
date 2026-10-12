@@ -18,6 +18,7 @@ namespace Casino.Integration.Tests.Games;
 public sealed class PokerFlowTests(PostgresFixture db, RabbitMqFixture rabbit) : IDisposable
 {
     private const long BuyIn = 100;
+    private const long Fee = 10; // la comision de inscripcion de la casa (10 %)
     private const long Initial = 1_000;
 
     private readonly List<CasinoCluster> _clusters = [];
@@ -36,6 +37,13 @@ public sealed class PokerFlowTests(PostgresFixture db, RabbitMqFixture rabbit) :
     {
         var account = await cluster.Wallet.Services.GetRequiredService<WalletService>().GetAsync(accountId);
         return (account.Available, account.Reserved);
+    }
+
+    /// <summary>(lo disponible que sobra por encima de lo reservado, lo reservado): sirve para ver cuanto quedo reservado de una cuenta que arranco con <see cref="Initial"/>.</summary>
+    private static async Task<(long Spare, long Reserved)> BalanceReservedAsync(CasinoCluster cluster, Guid accountId)
+    {
+        var (available, reserved) = await BalanceAsync(cluster, accountId);
+        return (available + reserved - Initial, reserved);
     }
 
     private static async Task WaitUntilAsync(Func<Task<bool>> condition, string what, int seconds = 60)
@@ -71,7 +79,7 @@ public sealed class PokerFlowTests(PostgresFixture db, RabbitMqFixture rabbit) :
         && view.GetProperty("turnSeat").ValueKind == JsonValueKind.Number
         && view.GetProperty("turnSeat").GetInt32() == view.GetProperty("mySeat").GetInt32();
 
-    private async Task<(CasinoCluster Cluster, HttpClient One, HttpClient Two, Guid AccountOne, Guid AccountTwo, Guid TableId)> StartTableAsync()
+    private async Task<(CasinoCluster Cluster, HttpClient One, HttpClient Two, Guid AccountOne, Guid AccountTwo, Guid TableId)> StartTableAsync(int rebuys = 0)
     {
         var cluster = TestAuth.StartApp(db, rabbit);
         _clusters.Add(cluster);
@@ -89,12 +97,22 @@ public sealed class PokerFlowTests(PostgresFixture db, RabbitMqFixture rabbit) :
         Assert.Equal((2, 6), (rules.GetProperty("minPlayers").GetInt32(), rules.GetProperty("maxPlayers").GetInt32()));
         Assert.False(rules.GetProperty("allowsBots").GetBoolean());
 
-        var request = new HttpRequestMessage(HttpMethod.Post, "/games/poker/tables") { Content = JsonContent.Create(new { buyIn = BuyIn, maxPlayers = 2 }) };
+        // Antes de crear se cotiza: la entrada mas la comision (y las recompras posibles) es lo que se reserva.
+        var quote = await (await one.PostAsJsonAsync("/games/poker/quote", new { buyIn = BuyIn, maxPlayers = 2, options = new { bigBlind = 4, rebuys } })).Content.ReadFromJsonAsync<JsonElement>();
+        var stake = (BuyIn + Fee) * (1 + rebuys);
+        Assert.Equal(stake, quote.GetProperty("stake").GetInt64());
+        Assert.Equal(HttpStatusCode.BadRequest, (await one.PostAsJsonAsync("/games/poker/quote", new { buyIn = BuyIn, maxPlayers = 2, options = new { bigBlind = 50 } })).StatusCode); // ciega fuera de rango
+
+        var request = new HttpRequestMessage(HttpMethod.Post, "/games/poker/tables") { Content = JsonContent.Create(new { buyIn = BuyIn, maxPlayers = 2, options = new { bigBlind = 4, rebuys } }) };
         request.Headers.Add("Idempotency-Key", "poker-1");
         var tableId = (await (await one.SendAsync(request)).Content.ReadFromJsonAsync<JsonElement>()).GetProperty("tableId").GetGuid();
         Assert.Equal(HttpStatusCode.BadRequest, (await one.PostAsync($"/games/poker/tables/{tableId}/bots", content: null)).StatusCode); // sin bots
         Assert.Equal(HttpStatusCode.Accepted, (await two.PostAsync($"/games/poker/tables/{tableId}/join", content: null)).StatusCode);
         await WaitUntilAsync(async () => (await ViewAsync(one, tableId)).GetProperty("seats").EnumerateArray().All(s => s.GetProperty("ready").GetBoolean()), "las fichas reservadas");
+        Assert.Equal((0L, stake), await BalanceReservedAsync(cluster, accountOne)); // se reservo la entrada mas la comision (y las recompras posibles)
+        var created = await ViewAsync(one, tableId);
+        Assert.Equal(stake, created.GetProperty("stake").GetInt64());
+        Assert.Contains("Ciegas 2/4", created.GetProperty("description").GetString());
         Assert.Equal(HttpStatusCode.NoContent, (await one.PostAsync($"/games/poker/tables/{tableId}/start", content: null)).StatusCode);
         return (cluster, one, two, accountOne, accountTwo, tableId);
     }
@@ -171,13 +189,87 @@ public sealed class PokerFlowTests(PostgresFixture db, RabbitMqFixture rabbit) :
         }
 
         var payouts = view.GetProperty("payouts").EnumerateArray().Select(p => p.GetInt64()).ToList();
-        Assert.Equal(2 * BuyIn, payouts.Sum()); // lo que se puso entre los dos
-        Assert.Equal(1, payouts.Count(p => p > 0)); // uno se lleva todo
+        Assert.Equal(2 * BuyIn, payouts.Sum()); // el premio: las dos entradas, sin la comision
+        Assert.Equal(1, payouts.Count(p => p > 0)); // con dos jugadores se lo lleva todo el primero
         Assert.True(view.GetProperty("game").GetProperty("over").GetBoolean());
 
         var seatOne = (await ViewAsync(one, tableId)).GetProperty("mySeat").GetInt32();
         var seatTwo = (await ViewAsync(two, tableId)).GetProperty("mySeat").GetInt32();
-        await WaitUntilAsync(async () => await BalanceAsync(cluster, accountOne) == (Initial - BuyIn + payouts[seatOne], 0), "el pago del primero");
-        await WaitUntilAsync(async () => await BalanceAsync(cluster, accountTwo) == (Initial - BuyIn + payouts[seatTwo], 0), "el pago del segundo");
+        await WaitUntilAsync(async () => await BalanceAsync(cluster, accountOne) == (Initial - BuyIn - Fee + payouts[seatOne], 0), "el pago del primero");
+        await WaitUntilAsync(async () => await BalanceAsync(cluster, accountTwo) == (Initial - BuyIn - Fee + payouts[seatTwo], 0), "el pago del segundo");
+    }
+
+    [Fact]
+    public async Task A_player_who_busts_can_rebuy_out_of_turn_and_what_was_reserved_but_not_used_comes_back()
+    {
+        var (cluster, one, two, accountOne, accountTwo, tableId) = await StartTableAsync(rebuys: 1);
+        var tables = cluster.Games.Services.GetRequiredService<TableService>();
+        HttpClient[] clients = [one, two];
+        var rebought = 0;
+
+        var deadline = DateTime.UtcNow.AddSeconds(150);
+        JsonElement view;
+        while (true)
+        {
+            Assert.True(DateTime.UtcNow < deadline, "La partida no termino a tiempo.");
+            view = await ViewAsync(one, tableId);
+            if (view.GetProperty("status").GetString() == "Finished")
+            {
+                break;
+            }
+
+            var acted = false;
+            foreach (var client in clients)
+            {
+                var mine = await ViewAsync(client, tableId);
+                if (mine.GetProperty("status").GetString() != "Playing")
+                {
+                    continue;
+                }
+
+                var game = mine.GetProperty("game");
+                var actions = game.GetProperty("actions").EnumerateArray().Select(a => a.GetString()).ToList();
+                if (game.GetProperty("done").GetBoolean() && actions.Contains("rebuy"))
+                {
+                    // Quien se quedo sin fichas recompra aunque no sea su turno (el turno es de la pausa automatica).
+                    Assert.Equal(HttpStatusCode.NoContent, (await ActAsync(client, tableId, """{"type":"rebuy"}""")).StatusCode);
+                    rebought++;
+                    acted = true;
+                    break;
+                }
+
+                if (MyTurnToPlay(mine))
+                {
+                    var json = actions.Contains("raise")
+                        ? $$"""{"type":"raise","to":{{game.GetProperty("maxRaiseTo").GetInt64()}}}"""
+                        : actions.Contains("check") ? """{"type":"check"}""" : """{"type":"call"}""";
+                    Assert.Equal(HttpStatusCode.NoContent, (await ActAsync(client, tableId, json)).StatusCode);
+                    acted = true;
+                    break;
+                }
+            }
+
+            if (!acted)
+            {
+                await tables.TickAsync();
+                await Task.Delay(50);
+            }
+        }
+
+        Assert.True(rebought >= 1, "el primero en quedarse sin fichas siempre puede recomprar");
+        var game2 = view.GetProperty("game");
+        var pool = game2.GetProperty("prizePool").GetInt64();
+        var entries = pool / BuyIn; // las dos iniciales mas las recompras que se usaron
+        var payouts = view.GetProperty("payouts").EnumerateArray().Select(p => p.GetInt64()).ToList();
+        var houseFee = entries * Fee;
+        var reserved = (BuyIn + Fee) * 2 * 2; // 2 asientos x (entrada + comision) x (1 + 1 recompra)
+        Assert.Equal(reserved, payouts.Sum() + houseFee); // los pagos mas la comision de la casa son lo reservado
+        Assert.Equal(entries - 2, rebought);
+
+        var seatOne = (await ViewAsync(one, tableId)).GetProperty("mySeat").GetInt32();
+        var seatTwo = (await ViewAsync(two, tableId)).GetProperty("mySeat").GetInt32();
+        var stake = (BuyIn + Fee) * 2;
+        await WaitUntilAsync(async () => await BalanceAsync(cluster, accountOne) == (Initial - stake + payouts[seatOne], 0), "el pago del primero");
+        await WaitUntilAsync(async () => await BalanceAsync(cluster, accountTwo) == (Initial - stake + payouts[seatTwo], 0), "el pago del segundo");
     }
 }

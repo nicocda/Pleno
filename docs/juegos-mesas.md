@@ -6,7 +6,12 @@ sus reglas. Complementa al [contrato de juegos](juegos-contrato.md) (y a las mes
 ## Lo que pone la plataforma
 - **Mesas:** crear (entrada, jugadores, pública o privada con código), entrar, salir, agregar/quitar bots, iniciar, listar (`GET /games/{id}/tables`) y ver la mesa desde *tu* asiento.
 - **Fichas:** cada asiento humano es una apuesta del protocolo de rondas con la Wallet (reserva al sentarse, liquida con lo que se llevó); salir antes de empezar, cancelar o una reserva
-  tardía devuelven lo apostado. Los pagos del juego tienen que sumar lo puesto entre todos (bots incluidos).
+  tardía devuelven lo apostado. Los pagos del juego más lo que se queda la casa (`GameOutcome.HouseTake`, por ejemplo la comisión de un torneo) tienen que sumar lo reservado entre todos (bots incluidos).
+  Lo que se **reserva por asiento** (`PlayerTable.Stake`) puede ser más que la entrada: lo decide el juego al cotizar la mesa.
+- **Opciones de cada juego y cotización:** un juego puede declarar opciones de creación (`ITableGame.Options`: números o elecciones, p. ej. ciegas y recompras del Poker) y cotizar la mesa (`ITableGame.Quote`: cuánto se
+  reserva por asiento, las opciones ya normalizadas, un resumen y un desglose, o el motivo si no es válida). `POST /games/{id}/quote` la devuelve antes de crear; `GET /games/{id}/rules` lista las opciones y
+  `CreateTableBody.Options` las trae. Un juego que lee configuración de la casa implementa `IConfigurableGame`.
+- **Jugar fuera de turno:** `ITableGame.MayAct(state, seat)` deja que un asiento actúe sin ser el del turno (por ejemplo, decidir una recompra durante la pausa).
 - **Turnos y tiempos:** el turno tiene un límite (lo define el juego); si vence, juega el turno de "no actuó"; con 3 vencidos seguidos el asiento queda ausente y juega un bot.
   Un juego puede marcar un turno como **automático** (`TurnInfo.Automatic`, por ejemplo la pausa entre manos del Poker): al vencer el motor juega `TimeoutAction` sin contarle una falta a nadie.
 - **Bots:** el motor los juega con la jugada que da el juego (`BotAction`); no reservan fichas (la casa los respalda). Un juego puede **no tenerlos** (`ITableGame.AllowsBots`, el Poker): la

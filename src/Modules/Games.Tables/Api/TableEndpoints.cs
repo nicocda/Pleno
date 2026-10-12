@@ -8,7 +8,10 @@ using Microsoft.AspNetCore.Routing;
 namespace Casino.Modules.Games.Tables;
 
 /// <summary>Crear una mesa. La identidad sale del token; el cuerpo solo dice como es la mesa.</summary>
-public sealed record CreateTableBody(long BuyIn, int MaxPlayers, bool IsPrivate = false, string? Name = null);
+public sealed record CreateTableBody(long BuyIn, int MaxPlayers, bool IsPrivate = false, string? Name = null, System.Text.Json.JsonElement? Options = null);
+
+/// <summary>Cotizar una mesa antes de crearla: lo mismo que el cuerpo de crear, sin nombre ni privacidad.</summary>
+public sealed record QuoteTableBody(long BuyIn, int MaxPlayers, System.Text.Json.JsonElement? Options = null);
 
 public sealed record JoinTableBody(string? Code = null);
 
@@ -38,13 +41,20 @@ internal static class TableEndpoints
         group.MapGet("/rules", (TableService tables) =>
         {
             var game = tables.GameOf(gameId);
-            return Results.Ok(new { game.MinPlayers, game.MaxPlayers, game.MinBuyIn, game.MaxBuyIn, game.AllowsBots });
+            return Results.Ok(new { game.MinPlayers, game.MaxPlayers, game.MinBuyIn, game.MaxBuyIn, game.AllowsBots, game.Options });
+        });
+
+        // Cuanto se reserva por asiento (entrada, comision, recompras...) y si la mesa es valida, antes de crearla.
+        group.MapPost("/quote", (QuoteTableBody body, TableService tables) =>
+        {
+            var quote = tables.Quote(gameId, body.BuyIn, body.MaxPlayers, body.Options);
+            return Results.Ok(new { quote.Stake, quote.Description, quote.Breakdown });
         });
 
         group.MapPost("/tables", async (CreateTableBody body, HttpContext http, TableService tables, CancellationToken ct) =>
         {
             var userId = http.User.GetUserId();
-            var created = await tables.CreateAsync(userId, PlayerIds.WalletAccountFor(userId), gameId, body.BuyIn, body.MaxPlayers, body.IsPrivate, body.Name, http.Request.Headers[IdempotencyHeader].ToString(), ct);
+            var created = await tables.CreateAsync(userId, PlayerIds.WalletAccountFor(userId), gameId, body.BuyIn, body.MaxPlayers, body.IsPrivate, body.Name, http.Request.Headers[IdempotencyHeader].ToString(), body.Options, ct);
             return Results.Accepted($"/games/{gameId}/tables/{created.TableId}", new TableCreatedResponse(created.TableId, created.JoinCode, created.AlreadyCreated));
         });
 

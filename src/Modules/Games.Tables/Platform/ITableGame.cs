@@ -13,7 +13,8 @@ public sealed class TableRuleException(string code, string message) : Exception(
 /// <param name="Seed">La semilla de la partida (provably fair): el mazo sale de ella.</param>
 /// <param name="TableId">Id de la mesa (se usa para separar los flujos de numeros de cada partida).</param>
 /// <param name="BuyIn">Lo que puso cada asiento.</param>
-public sealed record GameStartContext(int Seats, string Seed, Guid TableId, long BuyIn, DateTimeOffset Now);
+/// <param name="Options">Las opciones de la mesa ya normalizadas por <see cref="ITableGame.Quote"/> (JSON propio del juego), o null si el juego no tiene.</param>
+public sealed record GameStartContext(int Seats, string Seed, Guid TableId, long BuyIn, DateTimeOffset Now, string? Options = null);
 
 /// <summary>
 /// A quien le toca y cuanto tiene para decidir. <paramref name="Automatic"/> marca una pausa del propio juego (por ejemplo entre dos manos de poker): cuando vence, el motor juega
@@ -21,8 +22,26 @@ public sealed record GameStartContext(int Seats, string Seed, Guid TableId, long
 /// </summary>
 public sealed record TurnInfo(int Seat, double Seconds, bool Automatic = false);
 
-/// <summary>El resultado final: lo que se lleva cada asiento (en fichas enteras). La suma tiene que ser igual a lo que se puso entre todos.</summary>
-public sealed record GameOutcome(IReadOnlyList<long> Payouts);
+/// <summary>
+/// El resultado final: lo que se lleva cada asiento (en fichas enteras). Los pagos mas lo que se queda la casa (<paramref name="HouseTake"/>, por ejemplo la comision de un torneo)
+/// tienen que ser iguales a lo que se reservo entre todos: la plataforma lo verifica antes de pagar.
+/// </summary>
+public sealed record GameOutcome(IReadOnlyList<long> Payouts, long HouseTake = 0);
+
+/// <summary>Una opcion con la que se crea una mesa de un juego (para que la pantalla arme el formulario). <c>Kind</c>: <c>number</c> (campo numerico) o <c>choice</c> (una de <c>Choices</c>).</summary>
+public sealed record TableOption(string Key, string Label, string Hint, string Kind, IReadOnlyList<long>? Choices = null, long? Min = null, long? Max = null, long? Default = null);
+
+/// <summary>
+/// La cotizacion de una mesa antes de crearla: cuanto se reserva por asiento (entrada, comision, recompras posibles...), las opciones ya normalizadas, un resumen corto para el listado y el
+/// desglose para mostrarle al jugador. Si lo que se pidio no es valido el juego lanza <see cref="TableRuleException"/> con el motivo.
+/// </summary>
+public sealed record TableQuote(long Stake, string? OptionsJson, string? Description, string? Breakdown);
+
+/// <summary>Un juego que lee su propia configuracion (seccion del appsettings) al registrarse: por ejemplo la comision de la casa.</summary>
+public interface IConfigurableGame
+{
+    void Configure(Microsoft.Extensions.Configuration.IConfiguration configuration);
+}
 
 /// <summary>
 /// El contrato de un juego de mesas ENTRE JUGADORES (Uno, Truco, Poker...). Es una maquina de estados PURA: sin base de datos, sin reloj propio, sin saber de la Wallet
@@ -43,6 +62,18 @@ public interface ITableGame
 
     /// <summary>Si el dueño puede sumar bots a la mesa. Un juego donde la casa no quiere poner fichas (poker) lo apaga: quien se ausenta no apuesta, pasa o se retira.</summary>
     bool AllowsBots => true;
+
+    /// <summary>Las opciones de creacion propias del juego (ciegas, recompras...). Vacio si no tiene.</summary>
+    IReadOnlyList<TableOption> Options => [];
+
+    /// <summary>
+    /// Valida la mesa que se quiere crear y la cotiza (cuanto se reserva por asiento y las opciones normalizadas). Por defecto la entrada es lo unico que se reserva. Lanza
+    /// <see cref="TableRuleException"/> si algo no es valido.
+    /// </summary>
+    TableQuote Quote(long buyIn, int maxPlayers, System.Text.Json.JsonElement? options) => new(buyIn, null, null, null);
+
+    /// <summary>Si ese asiento puede jugar ahora. Por defecto, solo el del turno; un juego puede dejar jugar fuera de turno (por ejemplo, recomprar entre manos).</summary>
+    bool MayAct(string state, int seat) => Turn(state) is { } turn && turn.Seat == seat;
 
     /// <summary>Arma la partida (reparte, baraja con la semilla...) y devuelve el estado inicial.</summary>
     string Start(GameStartContext context);

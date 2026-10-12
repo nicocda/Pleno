@@ -469,6 +469,27 @@ export interface TableRules {
   maxBuyIn: number;
   /** Si se pueden sumar bots a la mesa (el poker no los tiene). Ausente = si. */
   allowsBots?: boolean;
+  /** Opciones propias del juego al crear la mesa (ciegas, recompras...). */
+  options?: TableOptionDef[];
+}
+
+/** Una opcion al crear la mesa: `number` (campo numerico, opcional) o `choice` (una de `choices`). */
+export interface TableOptionDef {
+  key: string;
+  label: string;
+  hint: string;
+  kind: "number" | "choice";
+  choices?: number[] | null;
+  min?: number | null;
+  max?: number | null;
+  default?: number | null;
+}
+
+/** Cuanto cuesta crear esa mesa: lo que se reserva por asiento y el desglose. */
+export interface TableQuoteResult {
+  stake: number;
+  description: string | null;
+  breakdown: string | null;
 }
 
 /** Una mesa en el listado. `mine`: estoy sentado. */
@@ -484,6 +505,10 @@ export interface TableSummary {
   mine: boolean;
   isPrivate: boolean;
   createdAt: string;
+  /** Lo que se reserva por asiento (la entrada mas lo que el juego sume: comision, recompras). Ausente = la entrada. */
+  stake?: number;
+  /** Un resumen de las opciones de la mesa ("Ciegas 2/4 · 1 recompra"). */
+  description?: string | null;
 }
 
 export interface CreateTableBody {
@@ -491,6 +516,8 @@ export interface CreateTableBody {
   maxPlayers: number;
   isPrivate?: boolean;
   name?: string;
+  /** Las opciones propias del juego elegidas (clave -> valor). */
+  options?: Record<string, number>;
 }
 
 export interface TableCreated {
@@ -532,6 +559,8 @@ export interface TableState<G = unknown> {
   turnEndsAt: string | null;
   game: G | null;
   payouts: number[] | null;
+  stake?: number;
+  description?: string | null;
 }
 
 // Uno
@@ -568,9 +597,9 @@ export type UnoAction = { type: "play"; card: number; color?: number } | { type:
 
 // Poker (Texas Hold'em de una mano por mesa)
 export type PokerStreet = "preflop" | "flop" | "turn" | "river" | "done";
-export type PokerEventKind = "blind" | "fold" | "check" | "call" | "bet" | "raise" | "flop" | "turn" | "river" | "win" | "win_showdown" | "hand" | "out";
+export type PokerEventKind = "blind" | "fold" | "check" | "call" | "bet" | "raise" | "flop" | "turn" | "river" | "win" | "win_showdown" | "hand" | "out" | "rebuy";
 export type PokerCategoryName = "HighCard" | "Pair" | "TwoPair" | "ThreeOfAKind" | "Straight" | "Flush" | "FullHouse" | "FourOfAKind" | "StraightFlush";
-export type PokerActionName = "call" | "check" | "fold" | "raise";
+export type PokerActionName = "call" | "check" | "fold" | "raise" | "decline" | "rebuy";
 
 export interface PokerEvent {
   /** -1 en los eventos de calle (flop, turn, river). */
@@ -591,8 +620,12 @@ export interface PokerPlayer {
   /** null salvo las propias y, al showdown, las de quienes siguen en la mano. */
   cards: number[] | null;
   cardCount: number;
-  /** Se quedo sin fichas: ya no juega manos. */
+  /** Se quedo sin fichas y no vuelve: ya no juega manos. */
   out: boolean;
+  /** Recompras que le quedan. */
+  rebuysLeft: number;
+  /** Se quedo sin fichas y tiene que decidir si recompra (hasta que vence la pausa). */
+  awaitingRebuy: boolean;
 }
 
 /** Un pozo de la mano (el principal o uno lateral) con quienes podian ganarlo y quienes lo ganaron. */
@@ -640,10 +673,24 @@ export interface PokerView {
   /** La semilla de la mano, revelada cuando la mano termina. */
   handSeed: string | null;
   pots: PokerPot[];
+  smallBlind: number;
+  bigBlind: number;
+  /** La ciega grande del proximo nivel y cuantas manos faltan para que suba. */
+  nextBigBlind: number;
+  handsToNextLevel: number;
+  /** Recompras que permite la mesa por jugador. */
+  rebuys: number;
+  entry: number;
+  fee: number;
+  /** Lo que se reparte entre los primeros (una entrada por asiento y por recompra, sin la comision) y como. */
+  prizePool: number;
+  prizes: number[];
+  /** Los asientos del primero al ultimo, cuando la partida termino. */
+  ranking: number[];
 }
 
 /** La jugada propia de Poker. `to`: monto TOTAL al que se sube en esta ronda. */
-export type PokerAction = { type: "fold" } | { type: "check" } | { type: "call" } | { type: "raise"; to: number };
+export type PokerAction = { type: "fold" } | { type: "check" } | { type: "call" } | { type: "raise"; to: number } | { type: "rebuy" } | { type: "decline" };
 
 // Truco
 export type TrucoEventKind = "start" | "play" | "truco" | "retruco" | "vale4" | "envido" | "real_envido" | "falta_envido" | "quiero" | "no_quiero" | "mazo" | "baza" | "parda" | "envido_result" | "hand_end";

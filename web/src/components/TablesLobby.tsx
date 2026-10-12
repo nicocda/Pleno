@@ -1,6 +1,6 @@
 import { useRef, useState, type FormEvent, type ReactNode } from "react";
 import { ApiError } from "../api/client";
-import { useCreateTable, useJoinByCode, useJoinTable, useLeaveTable, useStartTable, useTable, useTableBots, useTableRules, useTables } from "../api/hooks";
+import { useCreateTable, useJoinByCode, useJoinTable, useLeaveTable, useStartTable, useTable, useTableBots, useTableQuote, useTableRules, useTables } from "../api/hooks";
 import type { TableRules, TableState, TableSummary } from "../api/types";
 import { formatChips } from "../lib/format";
 import { detailedErrorMessage } from "../lib/messages";
@@ -111,14 +111,14 @@ function TableList({ gameId, gameName, tables, loading, failed, onEnter }: { gam
               <div>
                 <p className="tl-table__name">{table.name}</p>
                 <p className="muted tl-table__meta">
-                  Entrada de {formatChips(table.buyIn)} fichas · {table.players}/{table.maxPlayers} jugadores{table.bots > 0 ? ` (${plural(table.bots, "bot", "bots")})` : ""}
+                  Entrada de {formatChips(table.buyIn)} fichas · {table.players}/{table.maxPlayers} jugadores{table.bots > 0 ? ` (${plural(table.bots, "bot", "bots")})` : ""}{table.description ? ` · ${table.description}` : ""}
                 </p>
               </div>
               <button
                 type="button"
                 className="btn btn--gold"
                 aria-label={`Unirme a ${table.name}`}
-                disabled={join.isPending || table.players >= table.maxPlayers || (balance.ready && table.buyIn > balance.available)}
+                disabled={join.isPending || table.players >= table.maxPlayers || (balance.ready && (table.stake ?? table.buyIn) > balance.available)}
                 onClick={() => sit(table)}
               >
                 {table.players >= table.maxPlayers ? "Llena" : "Unirme"}
@@ -152,22 +152,35 @@ function CreateTable({ gameId, gameName, rules, rulesFailed, onCreated }: { game
   const [players, setPlayers] = useState<number | null>(null);
   const [isPrivate, setIsPrivate] = useState(false);
   const [name, setName] = useState("");
+  const [optionValues, setOptionValues] = useState<Record<string, number | null>>({});
   const [error, setError] = useState<string | null>(null);
   const pending = useRef<{ fingerprint: string; key: string } | null>(null);
+
+  const entry = buyIn ?? (rules ? Math.min(rules.maxBuyIn, Math.max(rules.minBuyIn, 10)) : 0);
+  const seats = players ?? rules?.minPlayers ?? 2;
+  const entryValid = rules !== undefined && Number.isInteger(entry) && entry >= rules.minBuyIn && entry <= rules.maxBuyIn;
+  const gameOptions = rules?.options ?? [];
+  const hasOptions = gameOptions.length > 0;
+  // Lo elegido de las opciones del juego: las de tipo "choice" siempre llevan valor (el elegido o el por defecto); las numericas solo si se escribio algo.
+  const chosenOptions: Record<string, number> = {};
+  for (const def of gameOptions) {
+    const value = optionValues[def.key] ?? (def.kind === "choice" ? def.default ?? null : null);
+    if (value !== null && value !== undefined && Number.isFinite(value)) chosenOptions[def.key] = value;
+  }
+  const quote = useTableQuote(gameId, { buyIn: entry, maxPlayers: seats, options: chosenOptions }, hasOptions && entryValid);
 
   if (rulesFailed) return <p className="notice notice--error" role="alert">No pudimos cargar las reglas de {gameName}.</p>;
   if (!rules) return null;
 
-  const entry = buyIn ?? Math.min(rules.maxBuyIn, Math.max(rules.minBuyIn, 10));
-  const seats = players ?? rules.minPlayers;
-  const entryValid = Number.isInteger(entry) && entry >= rules.minBuyIn && entry <= rules.maxBuyIn;
-  const affordable = !balance.ready || entry <= balance.available;
+  const reserve = hasOptions && quote.data ? quote.data.stake : entry;
+  const affordable = !balance.ready || reserve <= balance.available;
+  const quoteOk = !hasOptions || quote.isSuccess;
   const options = Array.from({ length: rules.maxPlayers - rules.minPlayers + 1 }, (_, i) => rules.minPlayers + i);
 
   const submit = async (event: FormEvent) => {
     event.preventDefault();
     setError(null);
-    const body = { buyIn: entry, maxPlayers: seats, isPrivate, name: name.trim() || undefined };
+    const body = { buyIn: entry, maxPlayers: seats, isPrivate, name: name.trim() || undefined, ...(hasOptions ? { options: chosenOptions } : {}) };
     const fingerprint = JSON.stringify(body);
     if (pending.current?.fingerprint !== fingerprint) pending.current = { fingerprint, key: crypto.randomUUID() };
     try {
@@ -194,7 +207,11 @@ function CreateTable({ gameId, gameName, rules, rulesFailed, onCreated }: { game
           <span>Entrada (fichas)</span>
           <input type="number" inputMode="numeric" min={rules.minBuyIn} max={rules.maxBuyIn} step={1} value={entry} aria-invalid={!entryValid} aria-describedby="tl-entry-hint" onChange={(e) => setBuyIn(Math.trunc(Number(e.target.value)))} />
         </label>
-        <p id="tl-entry-hint" className="tl-hint">Lo que pone cada jugador para sentarse. El ganador se lleva todo el pozo{entryValid ? `: con ${plural(seats, "jugador", "jugadores")}, ${formatChips(entry * seats)} fichas` : ""}.</p>
+        <p id="tl-entry-hint" className="tl-hint">
+          {hasOptions
+            ? "Las fichas con las que arranca cada jugador. La comisión de la casa se suma aparte y el premio se reparte entre los primeros."
+            : `Lo que pone cada jugador para sentarse. El ganador se lleva todo el pozo${entryValid ? `: con ${plural(seats, "jugador", "jugadores")}, ${formatChips(entry * seats)} fichas` : ""}.`}
+        </p>
         <div className="field" role="radiogroup" aria-label="Jugadores">
           <span>Jugadores</span>
           <div className="chips">
@@ -206,18 +223,53 @@ function CreateTable({ gameId, gameName, rules, rulesFailed, onCreated }: { game
           </div>
         </div>
         <p className="tl-hint">Cuántos asientos tiene la mesa{rules.allowsBots === false ? "." : "; los que no ocupen personas los podés completar con bots."}</p>
+        {gameOptions.map((def) => (
+          <div key={def.key} className="tl-option">
+            {def.kind === "choice" ? (
+              <div className="field" role="radiogroup" aria-label={def.label}>
+                <span>{def.label}</span>
+                <div className="chips">
+                  {(def.choices ?? []).map((n) => {
+                    const on = (optionValues[def.key] ?? def.default ?? null) === n;
+                    return (
+                      <button key={n} type="button" role="radio" aria-checked={on} className={`choice choice--stake ${on ? "choice--on" : ""}`} onClick={() => setOptionValues((v) => ({ ...v, [def.key]: n }))}>
+                        {n}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            ) : (
+              <label className="field">
+                <span>{def.label} (opcional)</span>
+                <input
+                  type="number"
+                  inputMode="numeric"
+                  min={def.min ?? undefined}
+                  step={1}
+                  placeholder="Automática"
+                  value={optionValues[def.key] ?? ""}
+                  onChange={(e) => setOptionValues((v) => ({ ...v, [def.key]: e.target.value === "" ? null : Math.trunc(Number(e.target.value)) }))}
+                />
+              </label>
+            )}
+            <p className="tl-hint">{def.hint}</p>
+          </div>
+        ))}
+        {hasOptions && entryValid && quote.isSuccess && <p className="tl-hint" role="status" data-testid="tl-quote">{quote.data.description ? `${quote.data.description}. ` : ""}{quote.data.breakdown}</p>}
+        {hasOptions && entryValid && quote.isError && <p className="notice notice--error" role="alert">{detailedErrorMessage(quote.error)}</p>}
         <label className="tl-check">
           <input type="checkbox" checked={isPrivate} aria-describedby="tl-private-hint" onChange={(e) => setIsPrivate(e.target.checked)} />
           <span>Mesa privada (se entra con un código)</span>
         </label>
         <p id="tl-private-hint" className="tl-hint">{isPrivate ? "No aparece en la lista: te damos un código de 6 caracteres para pasarle a quien quieras que juegue." : "Aparece en la lista de mesas abiertas y cualquiera puede unirse."}</p>
         {!entryValid && <p className="notice notice--error" role="alert">La entrada va de {formatChips(rules.minBuyIn)} a {formatChips(rules.maxBuyIn)} fichas.</p>}
-        {entryValid && !affordable && <p className="notice notice--error" role="alert">No te alcanzan las fichas para esa entrada.</p>}
+        {entryValid && !affordable && <p className="notice notice--error" role="alert">{hasOptions ? `No te alcanzan las fichas para reservar ${formatChips(reserve)}.` : "No te alcanzan las fichas para esa entrada."}</p>}
         {error && <p className="notice notice--error" role="alert">{error}</p>}
       </form>
       {/* Pegado abajo (como en los juegos): el boton va fuera del formulario pero lo envia con `form`. */}
       <div className="dock">
-        <button type="submit" form="tl-create-form" className="btn btn--gold btn--lg btn--block" disabled={!entryValid || !affordable || create.isPending}>
+        <button type="submit" form="tl-create-form" className="btn btn--gold btn--lg btn--block" disabled={!entryValid || !affordable || !quoteOk || create.isPending}>
           {create.isPending ? "Creando…" : "Crear mesa"}
         </button>
       </div>
@@ -309,7 +361,7 @@ function WaitingRoom({ gameId, gameName, table, onExit }: { gameId: string; game
     <section className="card tl-room" aria-labelledby="tl-sala">
       <h2 id="tl-sala" className="section-title">{table.name}</h2>
       <p className="muted">
-        {gameName} · entrada de {formatChips(table.buyIn)} fichas · {table.seats.length}/{table.maxPlayers} jugadores{table.isPrivate ? " · mesa privada" : ""}
+        {gameName} · entrada de {formatChips(table.buyIn)} fichas · {table.seats.length}/{table.maxPlayers} jugadores{table.isPrivate ? " · mesa privada" : ""}{table.description ? ` · ${table.description}` : ""}
       </p>
 
       {table.isPrivate && table.joinCode && (

@@ -37,10 +37,12 @@ public sealed record TableView(
     int? TurnSeat,
     DateTimeOffset? TurnEndsAt,
     object? Game,
-    IReadOnlyList<long>? Payouts);
+    IReadOnlyList<long>? Payouts,
+    long Stake,
+    string? Description);
 
 /// <summary>Una mesa en el listado.</summary>
-public sealed record TableSummary(Guid Id, string GameId, string Name, long BuyIn, int MaxPlayers, int Players, int Bots, TableStatus Status, bool Mine, bool IsPrivate, DateTimeOffset CreatedAt);
+public sealed record TableSummary(Guid Id, string GameId, string Name, long BuyIn, int MaxPlayers, int Players, int Bots, TableStatus Status, bool Mine, bool IsPrivate, DateTimeOffset CreatedAt, long Stake, string? Description);
 
 public sealed record TableCreated(Guid TableId, string? JoinCode, bool AlreadyCreated);
 
@@ -74,13 +76,9 @@ public sealed partial class TableService(
 
     // ---- Lo que hace el jugador ----
 
-    public async Task<TableCreated> CreateAsync(Guid userId, Guid accountId, string gameId, long buyIn, int maxPlayers, bool isPrivate, string? name, string idempotencyKey, CancellationToken ct = default)
+    /// <summary>Cuanto saldria crear esa mesa (lo que se reserva por asiento y el desglose) y si es valida. No crea nada.</summary>
+    public TableQuote Quote(string gameId, long buyIn, int maxPlayers, JsonElement? gameOptions)
     {
-        if (string.IsNullOrWhiteSpace(idempotencyKey) || idempotencyKey.Length > 128)
-        {
-            throw new GamesDomainException(GamesError.InvalidIdempotencyKey, "La IdempotencyKey es obligatoria y de hasta 128 caracteres.");
-        }
-
         var game = GameOf(gameId);
         if (buyIn < game.MinBuyIn || buyIn > game.MaxBuyIn)
         {
@@ -91,6 +89,26 @@ public sealed partial class TableService(
         {
             throw new GamesDomainException(GamesError.InvalidBet, $"La mesa es de {game.MinPlayers} a {game.MaxPlayers} jugadores.");
         }
+
+        try
+        {
+            return game.Quote(buyIn, maxPlayers, gameOptions);
+        }
+        catch (TableRuleException ex)
+        {
+            throw new GamesDomainException(GamesError.InvalidBet, ex.Message);
+        }
+    }
+
+    public async Task<TableCreated> CreateAsync(Guid userId, Guid accountId, string gameId, long buyIn, int maxPlayers, bool isPrivate, string? name, string idempotencyKey, JsonElement? gameOptions = null, CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(idempotencyKey) || idempotencyKey.Length > 128)
+        {
+            throw new GamesDomainException(GamesError.InvalidIdempotencyKey, "La IdempotencyKey es obligatoria y de hasta 128 caracteres.");
+        }
+
+        var game = GameOf(gameId);
+        var quote = Quote(gameId, buyIn, maxPlayers, gameOptions);
 
         var tableId = TableIdFor(userId, gameId, idempotencyKey);
         await using var session = store.LightweightSession();
@@ -113,6 +131,9 @@ public sealed partial class TableService(
             IsPrivate = isPrivate,
             JoinCode = isPrivate ? NewJoinCode() : null,
             BuyIn = buyIn,
+            Stake = quote.Stake,
+            OptionsJson = quote.OptionsJson,
+            Description = quote.Description,
             MaxPlayers = maxPlayers,
             Status = TableStatus.Open,
             Commitment = ProvablyFair.Commitment(seed),
@@ -124,7 +145,7 @@ public sealed partial class TableService(
         session.Insert(table);
         session.Insert(bet);
         await using var outboxSession = outbox.Enroll(session);
-        await outboxSession.PublishAsync(new ReserveStake(bet.Id, accountId, buyIn, options.ReservationSeconds, gameId));
+        await outboxSession.PublishAsync(new ReserveStake(bet.Id, accountId, table.ReservedPerSeat, options.ReservationSeconds, gameId));
         await BroadcastAsync(outboxSession, table, now);
         await session.SaveChangesAsync(ct);
         return new TableCreated(tableId, table.JoinCode, AlreadyCreated: false);
@@ -162,7 +183,7 @@ public sealed partial class TableService(
             session.Store(table);
             session.Insert(bet);
             await using var outboxSession = outbox.Enroll(session);
-            await outboxSession.PublishAsync(new ReserveStake(bet.Id, accountId, table.BuyIn, options.ReservationSeconds, table.GameId));
+            await outboxSession.PublishAsync(new ReserveStake(bet.Id, accountId, table.ReservedPerSeat, options.ReservationSeconds, table.GameId));
             await BroadcastAsync(outboxSession, table, now);
             await session.SaveChangesAsync(ct);
         });
@@ -293,7 +314,7 @@ public sealed partial class TableService(
 
             var now = clock.GetUtcNow();
             var seed = protector.Unprotect(table.EncryptedSeed, AadFor(table.Id));
-            var state = game.Start(new GameStartContext(table.Seats.Count, seed, table.Id, table.BuyIn, now));
+            var state = game.Start(new GameStartContext(table.Seats.Count, seed, table.Id, table.BuyIn, now, table.OptionsJson));
             table.Status = TableStatus.Playing;
             table.StartedAt = now;
             await AdvanceAsync(session, table, game, state, now, ct);
@@ -317,13 +338,13 @@ public sealed partial class TableService(
                 throw new GamesDomainException(GamesError.TableClosed, "La partida no esta en juego.");
             }
 
-            if (table.TurnSeat != seat)
+            var game = GameOf(table.GameId);
+            if (table.TurnSeat != seat && !game.MayAct(table.StateJson!, seat))
             {
                 throw new GamesDomainException(GamesError.NotYourTurn, "No es tu turno.");
             }
 
             var now = clock.GetUtcNow();
-            var game = GameOf(table.GameId);
             table.Seats[seat].Misses = 0;
             table.Seats[seat].Away = false;
             await AdvanceAsync(session, table, game, ApplyOrThrow(game, table.StateJson!, seat, action, now), now, ct);
@@ -355,7 +376,7 @@ public sealed partial class TableService(
         var isOwner = table.OwnerUserId == userId;
         return new TableView(
             clock.GetUtcNow(), table.Id, table.GameId, table.Name, table.Status, table.BuyIn, game.MinPlayers, table.MaxPlayers, isOwner, table.IsPrivate,
-            isOwner ? table.JoinCode : null, table.Commitment, table.ServerSeed, seats, mySeat >= 0 ? mySeat : null, table.TurnSeat, table.TurnEndsAt, view, table.Payouts);
+            isOwner ? table.JoinCode : null, table.Commitment, table.ServerSeed, seats, mySeat >= 0 ? mySeat : null, table.TurnSeat, table.TurnEndsAt, view, table.Payouts, table.ReservedPerSeat, table.Description);
     }
 
     /// <summary>Las mesas abiertas (publicas) del juego, mas las propias en curso.</summary>
@@ -579,12 +600,12 @@ public sealed partial class TableService(
     private async Task FinishAsync(IDocumentSession session, IOutboxSession outboxSession, PlayerTable table, GameOutcome outcome, DateTimeOffset now, CancellationToken ct)
     {
         var payouts = outcome.Payouts.ToList();
-        var expected = table.BuyIn * table.Seats.Count;
-        if (payouts.Count != table.Seats.Count || payouts.Any(p => p < 0) || payouts.Sum() != expected)
+        var expected = table.ReservedPerSeat * table.Seats.Count;
+        if (payouts.Count != table.Seats.Count || payouts.Any(p => p < 0) || outcome.HouseTake < 0 || payouts.Sum() + outcome.HouseTake != expected)
         {
-            // Una cuenta que no cierra es un error del juego: nadie pierde por eso, se devuelve la entrada de cada uno.
-            LogPayoutsMismatch(logger, table.GameId, table.Id, expected, payouts.Sum());
-            payouts = [.. table.Seats.Select(_ => table.BuyIn)];
+            // Una cuenta que no cierra es un error del juego: nadie pierde por eso, se devuelve lo reservado a cada uno.
+            LogPayoutsMismatch(logger, table.GameId, table.Id, expected, payouts.Sum() + outcome.HouseTake);
+            payouts = [.. table.Seats.Select(_ => table.ReservedPerSeat)];
         }
 
         table.Status = TableStatus.Finished;
@@ -619,14 +640,14 @@ public sealed partial class TableService(
     }
 
     private static TableSummary Summary(PlayerTable table, Guid userId) =>
-        new(table.Id, table.GameId, table.Name, table.BuyIn, table.MaxPlayers, table.HumanCount, table.Seats.Count(s => s.IsBot), table.Status, table.SeatOf(userId) >= 0, table.IsPrivate, table.CreatedAt);
+        new(table.Id, table.GameId, table.Name, table.BuyIn, table.MaxPlayers, table.HumanCount, table.Seats.Count(s => s.IsBot), table.Status, table.SeatOf(userId) >= 0, table.IsPrivate, table.CreatedAt, table.ReservedPerSeat, table.Description);
 
     private static TableBet SitDown(PlayerTable table, Guid userId, Guid accountId, DateTimeOffset now)
     {
         var betId = BetIdFor(table.Id, userId);
         table.Seats.Add(new TableSeat { UserId = userId, AccountId = accountId, BetId = betId });
         table.SyncHumans();
-        return new TableBet { Id = betId, TableId = table.Id, GameId = table.GameId, UserId = userId, AccountId = accountId, Stake = table.BuyIn, Status = RoundStatus.Placed, PlacedAt = now };
+        return new TableBet { Id = betId, TableId = table.Id, GameId = table.GameId, UserId = userId, AccountId = accountId, Stake = table.ReservedPerSeat, Status = RoundStatus.Placed, PlacedAt = now };
     }
 
     private static async Task<PlayerTable> LoadAsync(IDocumentSession session, Guid tableId, CancellationToken ct) =>
