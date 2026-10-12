@@ -296,7 +296,7 @@ a { color: inherit; }
 
 /* ---- Tapete y rueda (3b) ---- */
 .board { display: grid; gap: 10px; margin: 6px 0 14px; }
-.board__numbers { position: relative; display: grid; grid-template-columns: repeat(13, 1fr); grid-template-rows: repeat(3, 44px); gap: 0; padding: 0; overflow: visible; background: var(--felt); border: 2px solid var(--gold); border-radius: var(--radius); }
+.board__numbers { position: relative; display: grid; grid-template-columns: repeat(14, 1fr); grid-template-rows: repeat(3, 44px); gap: 0; padding: 0; overflow: visible; background: var(--felt); border: 2px solid var(--gold); border-radius: var(--radius); }
 .cell { position: relative; display: grid; place-items: center; font: inherit; font-weight: 800; font-size: 0.85rem; color: #fff; border: 1px solid rgb(255 255 255 / 0.35); border-radius: 4px; cursor: pointer; }
 .cell--red { background: var(--red); }
 .cell--black { background: var(--black); }
@@ -316,6 +316,7 @@ a { color: inherit; }
 .board__row--2 { grid-template-columns: repeat(2, 1fr); }
 .board__row--4 { grid-template-columns: repeat(4, 1fr); }
 .outside { position: relative; display: grid; gap: 1px; justify-items: center; padding: 8px 4px; font: inherit; font-weight: 700; color: var(--text); background: var(--felt); border: 1px solid var(--gold); border-radius: 8px; cursor: pointer; }
+.outside--col { padding: 0; border-radius: 4px; font-size: 0.7rem; align-content: center; }
 .outside small { font-weight: 500; font-size: 0.7rem; color: var(--gold-soft); }
 .outside--red { background: var(--red); color: #fff; }
 .outside--black { background: var(--black); color: #fff; }

@@ -97,6 +97,11 @@ export function Board({ placed, disabled, winning, onPick, onRemove }: Props) {
           return numberButton(n, { gridColumn: column + 2, gridRow: row + 1 });
         })}
 
+        {columns.map((s) => (
+          // Columna 1 = fila de abajo (1, 4, 7...), columna 3 = fila de arriba.
+          <OutsideButton key={s.id} spot={s} text="2 a 1" compact style={{ gridColumn: COLUMNS + 2, gridRow: ROWS + 1 - s.selection[0]! }} on={isPlaced(s)} disabled={disabled} stake={stakes.get(s.id)} onPick={onPick} onRemove={remove} />
+        ))}
+
         {edges.map((s) => (
           <button
             key={s.id}
@@ -105,7 +110,7 @@ export function Board({ placed, disabled, winning, onPick, onRemove }: Props) {
             aria-pressed={isPlaced(s)}
             disabled={disabled}
             className={`hotspot hotspot--${s.kind} ${isPlaced(s) ? "hotspot--on" : ""}`}
-            style={{ left: `${((s.x! + 1) / (COLUMNS + 1)) * 100}%`, top: `${(s.y! / ROWS) * 100}%` }}
+            style={{ left: `${((s.x! + 1) / (COLUMNS + 2)) * 100}%`, top: `${(s.y! / ROWS) * 100}%` }}
             onClick={() => onPick(s)}
             {...remove(s)}
           >
@@ -118,11 +123,6 @@ export function Board({ placed, disabled, winning, onPick, onRemove }: Props) {
         <div className="board__row board__row--3">
           {dozens.map((s) => (
             <OutsideButton key={s.id} spot={s} text={`${s.selection[0]}ª docena`} on={isPlaced(s)} disabled={disabled} stake={stakes.get(s.id)} onPick={onPick} onRemove={remove} />
-          ))}
-        </div>
-        <div className="board__row board__row--3">
-          {columns.map((s) => (
-            <OutsideButton key={s.id} spot={s} text={`Columna ${s.selection[0]}`} on={isPlaced(s)} disabled={disabled} stake={stakes.get(s.id)} onPick={onPick} onRemove={remove} />
           ))}
         </div>
         <div className="board__row board__row--2">
@@ -140,11 +140,11 @@ export function Board({ placed, disabled, winning, onPick, onRemove }: Props) {
   );
 }
 
-function OutsideButton({ spot, text, on, disabled, stake, onPick, onRemove, tone }: { spot: Spot; text: string; on: boolean; disabled: boolean; stake?: number; onPick: (s: Spot) => void; onRemove: (s: Spot) => React.HTMLAttributes<HTMLButtonElement>; tone?: "red" | "black" }) {
+function OutsideButton({ spot, text, on, disabled, stake, onPick, onRemove, tone, compact, style }: { spot: Spot; text: string; compact?: boolean; style?: React.CSSProperties; on: boolean; disabled: boolean; stake?: number; onPick: (s: Spot) => void; onRemove: (s: Spot) => React.HTMLAttributes<HTMLButtonElement>; tone?: "red" | "black" }) {
   return (
-    <button type="button" aria-label={spot.label} aria-pressed={on} disabled={disabled} className={`outside ${tone ? `outside--${tone}` : ""} ${on ? "outside--on" : ""}`} onClick={() => onPick(spot)} {...onRemove(spot)}>
+    <button type="button" aria-label={spot.label} aria-pressed={on} disabled={disabled} className={`outside ${compact ? "outside--col" : ""} ${tone ? `outside--${tone}` : ""} ${on ? "outside--on" : ""}`} style={style} onClick={() => onPick(spot)} {...onRemove(spot)}>
       {text}
-      <small>x{spot.multiplier}</small>
+      {!compact && <small>x{spot.multiplier}</small>}
       {on && stake !== undefined && <Stack stake={stake} />}
     </button>
   );
