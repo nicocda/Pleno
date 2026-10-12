@@ -13,6 +13,11 @@ sus reglas. Complementa al [contrato de juegos](juegos-contrato.md) (y a las mes
   `CreateTableBody.Options` las trae. Un juego que lee configuración de la casa implementa `IConfigurableGame`.
 - **Renovación de reservas:** la Wallet libera sola una reserva a la hora como máximo. Mientras una partida está en curso, el motor renueva la reserva de cada asiento cada `ReservationRenewSeconds`
   (`ExtendReservation`), así una partida larga no pierde sus fichas; si el motor se cae, deja de renovar y la reserva vence sola ([ADR 0016](adr/0016-renovacion-de-reservas.md)).
+- **Mesas continuas (la mesa libre del Poker):** una mesa puede **no terminar** (`TableQuote.Continuous`). Nace `Playing` con todos los asientos (`TableSeat.IsVacant()` los libres) y el juego esperando
+  jugadores; cada uno se sienta con su monto (`POST /games/{id}/tables/{id}/join` con `amount`, dentro de `MinEntry`..`MaxEntry`) y puede recargar (`.../topup`, una `TableBet` de tipo `TopUp` por recarga). Una reserva
+  confirmada por la Wallet entra al juego con `ITableGame.SeatPlayer` o `AddChips` (si el juego no la acepta, se devuelve). El juego anota a quienes se levantan (`DrainCashOuts`) y la plataforma **liquida cada asiento
+  por separado**: el pago va a la primera reserva del jugador (las recargas, que ya estan en la pila, quedan en 0), el asiento queda libre y, cuando se va el ultimo, la mesa termina. `IsPassive` deja que un asiento que se esta
+  levantando juegue en automatico; `Shutdown` cierra la mesa devolviendo a cada uno lo suyo. Una mesa esperando jugadores (o con todos ausentes) mas de `Tables:CashIdleMinutes` (15) se cierra sola.
 - **Jugar fuera de turno:** `ITableGame.MayAct(state, seat)` deja que un asiento actúe sin ser el del turno (por ejemplo, decidir una recompra durante la pausa).
 - **Turnos y tiempos:** el turno tiene un límite (lo define el juego); si vence, juega el turno de "no actuó"; con 3 vencidos seguidos el asiento queda ausente y juega un bot.
   Un juego puede marcar un turno como **automático** (`TurnInfo.Automatic`, por ejemplo la pausa entre manos del Poker): al vencer el motor juega `TimeoutAction` sin contarle una falta a nadie.
@@ -34,5 +39,5 @@ La plataforma ya trae sus tests de integración (mesas, fichas, ausentes, privad
 - [Uno](juego-uno.md) · [Truco](juego-truco.md) · [Poker](juego-poker.md).
 
 ## Configuración (sección `Tables`)
-`BotThinkMilliseconds` (1.500), `OpenTableMinutes` (15), `ReservationSeconds` (3.600), `ReservationRenewSeconds` (600), `TickMilliseconds` (300) y `EngineEnabled` (true). **El motor tiene que correr en UNA sola
+`BotThinkMilliseconds` (1.500), `OpenTableMinutes` (15), `ReservationSeconds` (3.600), `ReservationRenewSeconds` (600), `CashIdleMinutes` (15), `TickMilliseconds` (300) y `EngineEnabled` (true). **El motor tiene que correr en UNA sola
 instancia** del servicio de juegos; las pruebas lo apagan y lo manejan a mano (`TableService.TickAsync`).

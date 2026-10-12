@@ -707,7 +707,7 @@ public sealed class PokerTests
         Assert.Equal("bad_blind", Assert.Throws<TableRuleException>(() => Game.Quote(1_000, 3, Opts("""{"bigBlind":8}"""))).Code); // 125 ciegas grandes: mas de 100
         Assert.Equal("bad_rebuys", Assert.Throws<TableRuleException>(() => Game.Quote(100, 3, Opts("""{"rebuys":3}"""))).Code);
         Assert.Equal("bad_option", Assert.Throws<TableRuleException>(() => Game.Quote(100, 3, Opts("""{"bigBlind":"mucha"}"""))).Code);
-        Assert.Equal(2, Game.Options.Count);
+        Assert.Equal(3, Game.Options.Count); // modalidad, ciega grande y recompras
     }
 
     [Fact]
@@ -914,6 +914,375 @@ public sealed class PokerTests
             Assert.Equal(reservedEach * seats, outcome.Payouts.Sum() + outcome.HouseTake);
             Assert.Equal((seats + final.RebuyCount) * 20L, outcome.HouseTake);
             Assert.All(outcome.Payouts, p => Assert.True(p >= 0));
+        }
+    }
+
+    // ---- Mesa libre (cash): asientos que se ocupan y se liberan, recarga, rake y espera ----
+
+    private static string CashOptions(long bigBlind = 4) => $$"""{"mode":1,"bigBlind":{{bigBlind}}}""";
+
+    private static string StartCash(int seats = 6, long creatorEntry = 100, long bigBlind = 4)
+    {
+        var quote = Game.Quote(creatorEntry, seats, Opts(CashOptions(bigBlind)));
+        return Game.Start(new GameStartContext(seats, "cash-seed", TableId, creatorEntry, DateTimeOffset.UnixEpoch, quote.OptionsJson));
+    }
+
+    private static string Sit(string state, int seat, long chips) => Game.SeatPlayer(state, seat, chips, DateTimeOffset.UnixEpoch);
+
+    private static string Top(string state, int seat, long chips) => Game.AddChips(state, seat, chips, DateTimeOffset.UnixEpoch);
+
+    private static string Leave(string state, int seat) => Game.Apply(state, seat, """{"type":"leave"}""", DateTimeOffset.UnixEpoch);
+
+    private static string TwoSeated(long first = 100, long second = 100, long bigBlind = 4) => Sit(Sit(StartCash(bigBlind: bigBlind), 0, first), 1, second);
+
+    /// <summary>Pasa de una mano a la siguiente: juega el turno automatico de la pausa.</summary>
+    private static string NextHand(string state)
+    {
+        var turn = Game.Turn(state)!;
+        Assert.True(turn.Automatic);
+        return Game.Apply(state, turn.Seat, Game.TimeoutAction(state, turn.Seat), DateTimeOffset.UnixEpoch);
+    }
+
+    /// <summary>Le pone las cartas a la mano en curso: las de cada asiento (por numero de asiento) y las cinco comunitarias.</summary>
+    private static string WithCards(string state, Dictionary<int, int[]> hole, int[] board)
+    {
+        var s = Parse(state);
+        foreach (var (seat, cards) in hole)
+        {
+            s.Players[seat].Cards = [.. cards];
+        }
+
+        s.Deck = [.. board, .. s.Deck.Where(c => !board.Contains(c) && !hole.Values.SelectMany(h => h).Contains(c))];
+        return Serialize(s);
+    }
+
+    private static long Chips(PokerState s) => s.Players.Sum(p => p.Stack + p.PendingChips) + s.CashOuts.Sum(c => c.Chips);
+
+    [Fact]
+    public void A_cash_table_quote_reserves_the_entry_and_reports_the_range_and_the_rake()
+    {
+        var quote = Game.Quote(100, 6, Opts(CashOptions()));
+
+        Assert.True(quote.Continuous);
+        Assert.Equal(100, quote.Stake); // sin comision de inscripcion: la casa cobra rake de los pozos
+        Assert.Equal((80L, 400L), (quote.MinEntry, quote.MaxEntry)); // de 20 a 100 ciegas grandes
+        Assert.Contains("Mesa libre", quote.Description);
+        Assert.Contains("rake 3 %", quote.Description);
+        Assert.Contains("\"cash\":true", quote.OptionsJson);
+        Assert.Equal("bad_blind", Assert.Throws<TableRuleException>(() => Game.Quote(50, 6, Opts(CashOptions()))).Code); // 50 no llega a 20 ciegas grandes
+        Assert.Equal("bad_rebuys", Assert.Throws<TableRuleException>(() => Game.Quote(100, 6, Opts("""{"mode":1,"bigBlind":4,"rebuys":1}"""))).Code);
+        Assert.Equal("bad_option", Assert.Throws<TableRuleException>(() => Game.Quote(100, 6, Opts("""{"mode":5}"""))).Code);
+        Assert.False(Game.Quote(100, 3, Opts("""{"mode":0,"bigBlind":4}""")).Continuous); // el torneo sigue igual
+    }
+
+    [Fact]
+    public void A_cash_table_starts_empty_and_waiting_until_two_players_sit()
+    {
+        var state = StartCash();
+        var s = Parse(state);
+
+        Assert.True(s.Cash);
+        Assert.True(s.Waiting);
+        Assert.All(s.Players, p => Assert.True(p.Vacant));
+        Assert.Null(Game.Turn(state)); // no hay nada que jugar
+        Assert.Null(Game.Outcome(state)); // y nunca termina por si sola
+
+        var one = Sit(state, 2, 100);
+        Assert.True(Parse(one).Waiting); // uno solo no alcanza
+        Assert.Null(Game.Turn(one));
+
+        var two = Sit(one, 4, 150);
+        var started = Parse(two);
+        Assert.False(started.Waiting);
+        Assert.Equal(1, started.HandNo);
+        Assert.NotNull(Game.Turn(two));
+        Assert.Equal(2, started.Players.Count(p => p.Cards.Count == 2));
+        Assert.Equal(250L, started.Players.Sum(p => p.Stack + p.Total));
+    }
+
+    [Fact]
+    public void Seating_checks_the_seat_and_the_entry_range()
+    {
+        var state = StartCash();
+
+        Assert.Equal("bad_entry", Assert.Throws<TableRuleException>(() => Sit(state, 0, 79)).Code);
+        Assert.Equal("bad_entry", Assert.Throws<TableRuleException>(() => Sit(state, 0, 401)).Code);
+        Assert.Equal("seat_taken", Assert.Throws<TableRuleException>(() => Sit(state, 9, 100)).Code);
+        var seated = Sit(state, 0, 100);
+        Assert.Equal("seat_taken", Assert.Throws<TableRuleException>(() => Sit(seated, 0, 100)).Code);
+        Assert.Equal("not_cash", Assert.Throws<TableRuleException>(() => Sit(StartHand(3), 0, 100)).Code);
+    }
+
+    [Fact]
+    public void Someone_who_sits_during_a_hand_waits_for_the_next_one_without_touching_the_pots()
+    {
+        var state = TwoSeated();
+        var before = Parse(state);
+
+        var three = Parse(Sit(state, 2, 200));
+
+        Assert.True(three.Players[2].Folded); // mira esta mano
+        Assert.Empty(three.Players[2].Cards);
+        Assert.Equal(before.Pot, three.Pot);
+
+        var done = Do(Serialize(three), "fold");
+        var next = Parse(NextHand(done));
+        Assert.Equal(2, next.HandNo);
+        Assert.Equal(3, next.Players.Count(p => p.Cards.Count == 2)); // ahora si juega
+    }
+
+    [Fact]
+    public void The_rake_is_a_percentage_of_every_pot_that_sees_the_flop_and_the_chips_always_add_up()
+    {
+        var state = TwoSeated();
+        var first = Parse(state).Current;
+        state = WithCards(state, new Dictionary<int, int[]> { [first] = [C(Spades, 14), C(Hearts, 14)], [1 - first] = [C(Spades, 13), C(Hearts, 13)] }, [C(Clubs, 2), C(Diamonds, 7), C(Clubs, 9), C(Diamonds, 3), C(Clubs, 4)]);
+
+        var done = Parse(ShoveUntilDone(state));
+
+        Assert.Equal(200, done.Pots.Sum(p => p.Amount));
+        Assert.Equal(6, done.Pots.Single().Rake); // 3 % de 200
+        Assert.Equal((6L, 6L), (done.HandRake, done.RakeTotal));
+        Assert.Equal(194L, done.Players[first].Stack); // el ganador cobra el pozo menos el rake
+        Assert.Equal(200L, Chips(done) + done.RakeTotal); // nada se pierde ni se crea
+        Assert.Null(Game.Outcome(Serialize(done)));
+    }
+
+    [Fact]
+    public void No_flop_no_drop_and_small_pots_round_down_to_no_rake()
+    {
+        // Preflop todos se retiran: el pozo es de las ciegas y la mano no llego al flop.
+        var folded = Parse(Do(TwoSeated(), "fold"));
+        Assert.Equal(0, folded.RakeTotal);
+        Assert.Equal(200L, folded.Players.Sum(p => p.Stack));
+
+        // Llega al flop con un pozo chico (3 % de 8 = 0,24): se redondea hacia abajo y no se cobra nada.
+        var state = TwoSeated(bigBlind: 2);
+        state = Do(state, "call"); // el que tiene el boton iguala
+        state = Do(state, "check"); // la ciega grande pasa: flop con 4 en el pozo
+        state = Do(state, "check");
+        state = Do(state, "fold"); // se retira en el flop: gana el que quedo, con el rake redondeado a cero
+        var done = Parse(state);
+        Assert.Equal(3, done.Board.Count);
+        Assert.Equal(0, done.RakeTotal);
+        Assert.Equal(200L, done.Players.Sum(p => p.Stack));
+    }
+
+    [Fact]
+    public void The_rake_is_taken_from_each_side_pot_but_not_from_a_bet_nobody_called()
+    {
+        // Entradas de 40, 100 y 200 (ciega grande 2: de 40 a 200). El corto tiene la mejor mano, el mediano la segunda y el largo la peor.
+        var state = Sit(Sit(Sit(StartCash(bigBlind: 2, creatorEntry: 100), 0, 40), 1, 100), 2, 200);
+        state = NextHand(Do(state, "fold")); // la primera mano es de dos (el tercero espera): se juega rapido y la segunda ya es de tres
+        state = Serialize(WithStacks(Parse(state), 40, 100, 200));
+        var hole = new Dictionary<int, int[]>
+        {
+            [0] = [C(Spades, 14), C(Hearts, 14)],
+            [1] = [C(Spades, 13), C(Hearts, 13)],
+            [2] = [C(Spades, 12), C(Hearts, 12)],
+        };
+        state = WithTurn(WithCards(state, hole, [C(Clubs, 2), C(Diamonds, 7), C(Clubs, 9), C(Diamonds, 3), C(Clubs, 4)]), 2);
+
+        var done = Parse(ShoveUntilDone(state));
+
+        Assert.Equal([120L, 120L, 100L], done.Pots.Select(p => p.Amount)); // principal 3 x 40, lateral 2 x 60 y lo que nadie le igualo al largo
+        Assert.Equal([3L, 3L, 0L], done.Pots.Select(p => p.Rake)); // 3 % de cada pozo (redondeado hacia abajo); lo no igualado no paga
+        Assert.Equal([117L, 117L, 100L], done.Players.Take(3).Select(p => p.Stack));
+        Assert.Equal(340L, Chips(done) + done.RakeTotal);
+    }
+
+    /// <summary>Pone las pilas con las que arranco cada asiento la mano (antes de las ciegas), para armar pilas desiguales.</summary>
+    private static PokerState WithStacks(PokerState s, params long[] starting)
+    {
+        for (var i = 0; i < starting.Length; i++)
+        {
+            s.Players[i].Stack = starting[i] - s.Players[i].Total;
+        }
+
+        return s;
+    }
+
+    [Fact]
+    public void A_top_up_enters_the_stack_at_the_next_hand_and_cannot_exceed_the_maximum()
+    {
+        var state = TwoSeated();
+
+        var topped = Parse(Top(state, 0, 150));
+        Assert.Equal(150L, topped.Players[0].PendingChips);
+        Assert.Equal(100L, topped.Players[0].Stack + topped.Players[0].Total); // la mano en curso sigue con la pila de antes
+        Assert.Equal("too_much", Assert.Throws<TableRuleException>(() => Top(Serialize(topped), 0, 200)).Code); // 100 + 150 + 200 > 400
+        Assert.Equal("not_seated", Assert.Throws<TableRuleException>(() => Top(state, 5, 50)).Code);
+        Assert.Equal("not_seated", Assert.Throws<TableRuleException>(() => Top(state, 0, 0)).Code);
+
+        var folded = Do(state, "fold"); // la mano termina y despues pasa la pausa
+        var topAfter = Top(folded, 0, 150);
+        var stackBefore = Parse(topAfter).Players[0].Stack;
+        var next = Parse(NextHand(topAfter));
+        Assert.Equal(0, next.Players[0].PendingChips);
+        Assert.Equal(stackBefore + 150, next.Players[0].Stack + next.Players[0].Total); // la recarga se sumo a la pila
+        Assert.Equal(350L, next.Players.Sum(p => p.Stack + p.Total));
+    }
+
+    [Fact]
+    public void Someone_who_busted_can_come_back_with_a_top_up_or_is_removed_when_the_next_hand_starts()
+    {
+        var state = TwoSeated(100, 100);
+        var first = Parse(state).Current;
+        state = WithCards(state, new Dictionary<int, int[]> { [first] = [C(Spades, 14), C(Hearts, 14)], [1 - first] = [C(Spades, 13), C(Hearts, 13)] }, [C(Clubs, 2), C(Diamonds, 7), C(Clubs, 9), C(Diamonds, 3), C(Clubs, 4)]);
+        var done = ShoveUntilDone(state);
+        var loser = 1 - first;
+        Assert.True(Parse(done).Players[loser].AwaitingRebuy);
+        Assert.Equal(20d, Game.Turn(done)!.Seconds); // ventana para recargar
+
+        // Recarga por debajo de la entrada minima: no vuelve. Con una valida, juega de inmediato y la pausa se acorta.
+        Assert.Equal("bad_entry", Assert.Throws<TableRuleException>(() => Top(done, loser, 50)).Code);
+        var back = Parse(Top(done, loser, 120));
+        Assert.Equal(120L, back.Players[loser].Stack);
+        Assert.False(back.Players[loser].AwaitingRebuy);
+        Assert.Equal(3d, Game.Turn(Serialize(back))!.Seconds);
+        Assert.Equal(2, Parse(NextHand(Serialize(back))).Players.Count(p => p.Cards.Count == 2));
+
+        // Si no recarga, al empezar la mano siguiente se va con 0 y la mesa espera.
+        var gone = Parse(NextHand(done));
+        Assert.True(gone.Players[loser].Vacant);
+        Assert.Contains(gone.CashOuts, c => c.Seat == loser && c.Chips == 0);
+        Assert.True(gone.Waiting);
+        Assert.Null(Game.Turn(Serialize(gone)));
+    }
+
+    [Fact]
+    public void Leaving_between_hands_cashes_out_at_once_and_during_a_hand_waits_for_it_to_end()
+    {
+        var state = Sit(TwoSeated(), 2, 120); // el tercero mira la mano 1
+        var s = Parse(state);
+
+        // En plena mano: el que esta en ella sigue en automatico (se retira solo) y se va al terminar.
+        var leaving = Parse(Leave(state, s.Current));
+        Assert.True(leaving.Players[s.Current].LeaveAfterHand);
+        Assert.True(Game.IsPassive(Serialize(leaving), s.Current));
+        Assert.Empty(leaving.CashOuts); // todavia no se fue
+        Assert.Equal("""{"type":"fold"}""", Game.BotAction(Serialize(leaving), s.Current));
+
+        // El que miraba la mano (no puso nada) se va ya.
+        var spectatorLeft = Leave(state, 2);
+        var (afterDrain, outs) = Game.DrainCashOuts(spectatorLeft);
+        Assert.Equal([new CashOut(2, 120)], outs);
+        Assert.True(Parse(afterDrain).Players[2].Vacant);
+        Assert.Empty(Parse(afterDrain).CashOuts); // ya se entrego: no se liquida dos veces
+
+        // Al terminar la mano el que pidio levantarse cobra lo que le queda y la mesa sigue con los demas.
+        var ended = Do(Serialize(leaving), "fold");
+        var drained = Game.DrainCashOuts(NextHand(ended));
+        var cashOut = Assert.Single(drained.CashOuts);
+        Assert.Equal(s.Current, cashOut.Seat);
+        Assert.Equal(98L, cashOut.Chips); // puso la ciega chica y se retiro: 100 - 2
+        Assert.Equal(2, Parse(drained.State).HandNo); // paso la pausa y arranco otra mano (hay dos con fichas)
+    }
+
+    [Fact]
+    public void When_not_enough_players_are_left_the_table_waits_and_starts_again_when_someone_sits()
+    {
+        var state = TwoSeated();
+        var folded = Do(state, "fold");
+        var left = Leave(folded, 0); // entre manos: se va ya
+        var (afterLeave, outs) = Game.DrainCashOuts(left);
+        Assert.Single(outs);
+
+        var waiting = Parse(NextHand(afterLeave));
+        Assert.True(waiting.Waiting); // queda uno solo con fichas
+        Assert.Null(Game.Turn(Serialize(waiting)));
+
+        var again = Parse(Sit(Serialize(waiting), 0, 100)); // se sienta otro: vuelve a haber dos y arranca sola
+        Assert.False(again.Waiting);
+        Assert.Equal(waiting.HandNo + 1, again.HandNo);
+        Assert.NotNull(Game.Turn(Serialize(again)));
+    }
+
+    [Fact]
+    public void Shutting_the_table_down_hands_everyone_their_chips_even_in_the_middle_of_a_hand()
+    {
+        var state = Sit(TwoSeated(100, 150), 2, 120);
+        state = Do(state, "raise", 20); // plata en el pozo
+        var mid = Parse(state);
+        Assert.True(mid.Pot > 0);
+
+        var (closed, outs) = Game.DrainCashOuts(Game.Shutdown(state));
+
+        Assert.Equal(370L, outs.Sum(c => c.Chips)); // 100 + 150 + 120: lo puesto en la mano vuelve a su dueño
+        Assert.Equal(3, outs.Count);
+        var after = Parse(closed);
+        Assert.All(after.Players, p => Assert.True(p.Vacant));
+        Assert.True(after.Waiting);
+        Assert.Null(Game.Turn(closed));
+    }
+
+    [Fact]
+    public void A_cash_game_with_players_coming_and_going_never_loses_or_creates_chips()
+    {
+        for (var seed = 0; seed < 12; seed++)
+        {
+            var rng = new Random(seed);
+            var state = StartCash(6);
+            long entered = 0;
+            long cashed = 0;
+            for (var step = 0; step < 3_000; step++)
+            {
+                var s = Parse(state);
+                var roll = rng.NextDouble();
+                try
+                {
+                    if (roll < 0.04 && s.Players.Any(p => p.Vacant))
+                    {
+                        var seat = Enumerable.Range(0, 6).Where(i => s.Players[i].Vacant).ElementAt(rng.Next(s.Players.Count(p => p.Vacant)));
+                        var chips = rng.NextInt64(80, 401);
+                        state = Sit(state, seat, chips);
+                        entered += chips;
+                    }
+                    else if (roll < 0.07)
+                    {
+                        var seated = Enumerable.Range(0, 6).Where(i => !s.Players[i].Vacant).ToList();
+                        if (seated.Count > 0)
+                        {
+                            var seat = seated[rng.Next(seated.Count)];
+                            var chips = rng.NextInt64(1, 200);
+                            state = Top(state, seat, chips);
+                            entered += chips;
+                        }
+                    }
+                    else if (roll < 0.09)
+                    {
+                        var seated = Enumerable.Range(0, 6).Where(i => !s.Players[i].Vacant).ToList();
+                        if (seated.Count > 0)
+                        {
+                            state = Leave(state, seated[rng.Next(seated.Count)]);
+                        }
+                    }
+                }
+                catch (TableRuleException)
+                {
+                    // Una jugada que las reglas rechazan (pila maxima, entrada fuera de rango...): no cambia nada.
+                }
+
+                var drained = Game.DrainCashOuts(state);
+                state = drained.State;
+                cashed += drained.CashOuts.Sum(c => c.Chips);
+
+                if (Game.Turn(state) is { } turn)
+                {
+                    var current = Parse(state);
+                    var action = turn.Automatic ? Game.TimeoutAction(state, turn.Seat) : PokerBot.Choose(current, turn.Seat);
+                    state = Game.Apply(state, turn.Seat, action, DateTimeOffset.UnixEpoch);
+                }
+
+                var now = Parse(state);
+                // Durante la mano las fichas estan en las pilas, lo recargado y el pozo; entre manos los pozos ya estan en las pilas.
+                Assert.Equal(entered, now.Players.Sum(p => p.Stack + p.PendingChips) + (now.Done || now.Waiting ? 0 : now.Pot) + now.CashOuts.Sum(c => c.Chips) + cashed + now.RakeTotal);
+            }
+
+            // Se cierra la mesa: todo lo que se puso es lo que se llevaron mas el rake de la casa.
+            var closing = Game.DrainCashOuts(Game.Shutdown(state));
+            cashed += closing.CashOuts.Sum(c => c.Chips);
+            Assert.Equal(entered, cashed + Parse(closing.State).RakeTotal);
         }
     }
 }

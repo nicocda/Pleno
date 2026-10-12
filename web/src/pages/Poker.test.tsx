@@ -22,7 +22,7 @@ const seats = (overrides: Partial<Record<number, Partial<TableSeat>>> = {}): Tab
   seat(2, { isBot: true, name: "Bot 3", ...overrides[2] }),
 ];
 
-const player = (n: number, overrides: Partial<PokerPlayer> = {}): PokerPlayer => ({ seat: n, stack: 90, bet: 0, folded: false, allIn: false, acted: false, cards: null, cardCount: 2, out: false, rebuysLeft: 0, awaitingRebuy: false, ...overrides });
+const player = (n: number, overrides: Partial<PokerPlayer> = {}): PokerPlayer => ({ seat: n, stack: 90, bet: 0, folded: false, allIn: false, acted: false, cards: null, cardCount: 2, out: false, rebuysLeft: 0, awaitingRebuy: false, vacant: false, pendingChips: 0, leaving: false, ...overrides });
 
 // Cartas: 12 = As de picas, 21 = 10 de corazones, 35 = Jota de diamantes, 0 = 2 de picas, 51 = As de treboles.
 const game = (overrides: Partial<PokerView> = {}): PokerView => ({
@@ -32,8 +32,13 @@ const game = (overrides: Partial<PokerView> = {}): PokerView => ({
   actions: ["call", "fold", "raise"], showdown: [], winnings: [0, 0, 0], done: false,
   events: [{ seat: 0, kind: "bet", amount: 20, allIn: false }],
   handNo: 1, over: false, commitment: "c".repeat(64), handSeed: null, pots: [],
-  smallBlind: 2, bigBlind: 4, nextBigBlind: 6, handsToNextLevel: 10, rebuys: 0, entry: 100, fee: 10, prizePool: 300, prizes: [195, 105], ranking: [], ...overrides,
+  smallBlind: 2, bigBlind: 4, nextBigBlind: 6, handsToNextLevel: 10, rebuys: 0, entry: 100, fee: 10, prizePool: 300, prizes: [195, 105], ranking: [],
+  cash: false, waiting: false, rakePermille: 0, rakeTotal: 0, handRake: 0, minEntry: 0, maxEntry: 0, ...overrides,
 });
+
+// Mesa libre: sin premios ni ciegas que suben; rake del 3 %, entrada de 20 a 100 ciegas grandes.
+const cashGame = (overrides: Partial<PokerView> = {}): PokerView =>
+  game({ cash: true, rakePermille: 30, minEntry: 80, maxEntry: 400, nextBigBlind: 4, handsToNextLevel: 0, prizePool: 0, prizes: [], rebuys: 0, ...overrides });
 
 const view = (overrides: Partial<TableState<PokerView>> = {}): TableState<PokerView> => ({
   serverNow: new Date().toISOString(), id: TABLE_ID, gameId: "poker", name: "Mesa de prueba", status: "Playing", buyIn: 100, minPlayers: 2, maxPlayers: 3, isOwner: true, isPrivate: false,
@@ -336,7 +341,7 @@ describe("Poker", () => {
       turnSeat: 0, turnEndsAt: iso(5_000),
       game: game({
         done: true, handNo: 2, street: "done", current: 0, actions: [], minRaiseTo: 0, maxRaiseTo: 0, toCall: 0, handSeed: SEED,
-        pots: [{ amount: 90, eligible: [0, 1, 2], winners: [0] }, { amount: 100, eligible: [1, 2], winners: [1] }, { amount: 120, eligible: [2], winners: [2] }],
+        pots: [{ amount: 90, rake: 0, eligible: [0, 1, 2], winners: [0] }, { amount: 100, rake: 0, eligible: [1, 2], winners: [1] }, { amount: 120, rake: 0, eligible: [2], winners: [2] }],
       }),
     });
     renderApp(<Poker />, { api: apiWith({ table }) });
@@ -466,6 +471,168 @@ describe("Poker", () => {
 
     expect(await screen.findByText("La ciega grande tiene que ser par y de 2 o mas (la chica es la mitad).")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Crear mesa" })).toBeDisabled();
+  });
+
+  it("shows a cash table with its blinds, entry range and rake and without prizes", async () => {
+    renderApp(<Poker />, { api: apiWith({ table: view({ game: cashGame() }) }) });
+
+    expect(await screen.findByTestId("pk-blinds")).toHaveTextContent("Mesa libre · mano 1 · ciegas 2/4");
+    expect(screen.getByTestId("pk-cash-info")).toHaveTextContent("Entrada de 80 a 400 fichas");
+    expect(screen.getByTestId("pk-cash-info")).toHaveTextContent("3 %");
+    expect(screen.queryByTestId("pk-prizes")).not.toBeInTheDocument();
+  });
+
+  it("waits for players when the cash table has fewer than two seated and shows the free seats", async () => {
+    const table = view({
+      turnSeat: null, turnEndsAt: null,
+      game: cashGame({ waiting: true, done: true, street: "done", players: [player(0, { vacant: true, stack: 0 }), player(1, { stack: 100 }), player(2, { vacant: true, stack: 0 })], actions: [] }),
+    });
+    renderApp(<Poker />, { api: apiWith({ table }) });
+
+    expect(await screen.findByTestId("pk-status")).toHaveTextContent("Esperando jugadores: la mano arranca cuando haya dos con fichas");
+    expect(screen.getAllByTestId("pk-seat-empty")).toHaveLength(2);
+  });
+
+  it("says the chips are being confirmed while the wallet has not seated the player yet", async () => {
+    const table = view({ turnSeat: null, turnEndsAt: null, game: cashGame({ waiting: true, players: [player(0, { stack: 100 }), player(1, { vacant: true, stack: 0 }), player(2, { vacant: true, stack: 0 })], actions: [] }) });
+    renderApp(<Poker />, { api: apiWith({ table }) });
+
+    expect(await screen.findByTestId("pk-status")).toHaveTextContent("Confirmando tus fichas…");
+  });
+
+  it("lets a seated player top up with an idempotency key and stand up, and shows the pending top-up", async () => {
+    const table = view({ game: cashGame({ players: [player(0), player(1, { stack: 90, pendingChips: 50, cards: [12, 21] }), player(2)] }) });
+    const api = apiWith({ table }, { [`POST /games/poker/tables/${TABLE_ID}/topup`]: () => undefined, [`POST /games/poker/tables/${TABLE_ID}/leave`]: () => undefined });
+    renderApp(<Poker />, { api });
+
+    const panel = await screen.findByTestId("pk-cash");
+    expect(panel).toHaveTextContent("Tu pila: 90");
+    expect(screen.getByTestId("pk-pending")).toHaveTextContent("+ 50 de recarga");
+
+    await userEvent.click(within(panel).getByRole("button", { name: "Recargar" }));
+    await userEvent.clear(screen.getByLabelText("Fichas a recargar"));
+    await userEvent.type(screen.getByLabelText("Fichas a recargar"), "100");
+    await userEvent.click(screen.getByRole("button", { name: "Confirmar recarga" }));
+    await waitFor(() => expect(api.calls.filter((c) => c.path === `/games/poker/tables/${TABLE_ID}/topup`)).toHaveLength(1));
+    const call = api.calls.find((c) => c.path === `/games/poker/tables/${TABLE_ID}/topup`)!;
+    expect(call.body).toEqual({ amount: 100 });
+    expect(call.headers?.["Idempotency-Key"]).toMatch(/^[0-9a-f-]{36}$/);
+
+    await userEvent.click(within(panel).getByRole("button", { name: "Levantarme" }));
+    await waitFor(() => expect(api.calls.some((c) => c.path === `/games/poker/tables/${TABLE_ID}/leave`)).toBe(true));
+  });
+
+  it("refuses a top-up above the maximum stack", async () => {
+    const table = view({ game: cashGame({ players: [player(0), player(1, { stack: 350, cards: [12, 21] }), player(2)] }) });
+    renderApp(<Poker />, { api: apiWith({ table }) });
+
+    await userEvent.click(await screen.findByRole("button", { name: "Recargar" }));
+    await userEvent.clear(screen.getByLabelText("Fichas a recargar"));
+    await userEvent.type(screen.getByLabelText("Fichas a recargar"), "60"); // 350 + 60 > 400
+
+    expect(screen.getByRole("button", { name: "Confirmar recarga" })).toBeDisabled();
+    expect(screen.getByText(/Hasta 50 fichas más/)).toBeInTheDocument();
+  });
+
+  it("offers to top up or stand up when the cash player ran out of chips, with the minimum entry as the floor", async () => {
+    const table = view({
+      turnSeat: 0, turnEndsAt: iso(15_000),
+      game: cashGame({ done: true, street: "done", current: 0, actions: [], handSeed: SEED, players: [player(0, { stack: 190 }), player(1, { stack: 0, awaitingRebuy: true }), player(2)] }),
+    });
+    renderApp(<Poker />, { api: apiWith({ table }) });
+
+    const panel = await screen.findByTestId("pk-rebuy");
+    expect(panel).toHaveTextContent("Te quedaste sin fichas");
+    expect(panel).toHaveTextContent("recargar (de 80 a 400 fichas) o levantarte");
+    await userEvent.click(within(panel).getByRole("button", { name: "Recargar" }));
+    await userEvent.clear(screen.getByLabelText("Fichas a recargar"));
+    await userEvent.type(screen.getByLabelText("Fichas a recargar"), "50");
+    expect(screen.getByRole("button", { name: "Confirmar recarga" })).toBeDisabled(); // por debajo de la entrada minima
+    await userEvent.clear(screen.getByLabelText("Fichas a recargar"));
+    await userEvent.type(screen.getByLabelText("Fichas a recargar"), "120");
+    expect(screen.getByRole("button", { name: "Confirmar recarga" })).toBeEnabled();
+  });
+
+  it("tells the player who asked to stand up during a hand that they leave when it ends", async () => {
+    const table = view({ game: cashGame({ players: [player(0), player(1, { stack: 90, leaving: true, cards: [12, 21] }), player(2)] }) });
+    renderApp(<Poker />, { api: apiWith({ table }) });
+
+    expect(await screen.findByTestId("pk-status")).toHaveTextContent("Te levantás al terminar la mano");
+    expect(screen.queryByRole("button", { name: "Levantarme" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Recargar" })).not.toBeInTheDocument();
+  });
+
+  it("shows how much the house took from the hand as rake, also per pot", async () => {
+    const table = view({
+      turnSeat: 0, turnEndsAt: iso(5_000),
+      game: cashGame({
+        done: true, street: "done", current: 0, actions: [], handSeed: SEED, handNo: 4, handRake: 6, rakeTotal: 12,
+        pots: [{ amount: 120, rake: 3, eligible: [0, 1], winners: [0] }, { amount: 100, rake: 3, eligible: [0, 1], winners: [1] }],
+      }),
+    });
+    renderApp(<Poker />, { api: apiWith({ table }) });
+
+    expect(await screen.findByTestId("pk-rake")).toHaveTextContent("La casa cobró 6 de rake en la mano 4");
+    const rows = screen.getAllByTestId("pk-pot-row");
+    expect(rows[0]).toHaveTextContent("rake 3");
+  });
+
+  it("lists a cash table with an amount field and joins with the chosen amount", async () => {
+    const api = fakeApi({
+      "GET /wallet/me": () => account,
+      "GET /games/poker/rules": () => ({ minPlayers: 2, maxPlayers: 6, minBuyIn: 40, maxBuyIn: 2_000, allowsBots: false }),
+      "GET /games/poker/tables": () => [mine({ mine: false, status: "Playing", players: 1, bots: 0, name: "Mesa libre de prueba", continuous: true, minEntry: 80, maxEntry: 400, description: "Mesa libre · ciegas 2/4 · entrada de 80 a 400 fichas · rake 3 %" })],
+      [`POST /games/poker/tables/${TABLE_ID}/join`]: () => undefined,
+    });
+    renderApp(<Poker />, { api });
+
+    const amount = await screen.findByLabelText("Fichas para entrar a Mesa libre de prueba");
+    expect(amount).toHaveValue(80);
+    await userEvent.clear(amount);
+    await userEvent.type(amount, "120");
+    await userEvent.click(screen.getByRole("button", { name: "Unirme a Mesa libre de prueba" }));
+
+    await waitFor(() => expect(api.calls.filter((c) => c.path === `/games/poker/tables/${TABLE_ID}/join`)).toHaveLength(1));
+    expect(api.calls.find((c) => c.path === `/games/poker/tables/${TABLE_ID}/join`)!.body).toEqual({ amount: 120 });
+  });
+
+  it("does not let join a cash table with an entry out of range", async () => {
+    const api = fakeApi({
+      "GET /wallet/me": () => account,
+      "GET /games/poker/rules": () => ({ minPlayers: 2, maxPlayers: 6, minBuyIn: 40, maxBuyIn: 2_000, allowsBots: false }),
+      "GET /games/poker/tables": () => [mine({ mine: false, status: "Playing", players: 1, bots: 0, name: "Mesa libre", continuous: true, minEntry: 80, maxEntry: 400 })],
+    });
+    renderApp(<Poker />, { api });
+
+    const amount = await screen.findByLabelText("Fichas para entrar a Mesa libre");
+    await userEvent.clear(amount);
+    await userEvent.type(amount, "50");
+
+    expect(screen.getByRole("button", { name: "Unirme a Mesa libre" })).toBeDisabled();
+  });
+
+  it("offers the mode when creating a table and hides the rebuys for a cash table", async () => {
+    const api = fakeApi({
+      "GET /wallet/me": () => account,
+      "GET /games/poker/rules": () => ({
+        minPlayers: 2, maxPlayers: 6, minBuyIn: 40, maxBuyIn: 2_000, allowsBots: false,
+        options: [
+          { key: "mode", label: "Modalidad", hint: "Torneo o mesa libre.", kind: "choice", choices: [0, 1], default: 0, labels: ["Torneo", "Mesa libre"] },
+          { key: "bigBlind", label: "Ciega grande", hint: "La chica es la mitad.", kind: "number", min: 2 },
+          { key: "rebuys", label: "Recompras", hint: "Cuántas veces.", kind: "choice", choices: [0, 1, 2], default: 0, visibleWhen: "mode=0" },
+        ],
+      }),
+      "GET /games/poker/tables": () => [],
+      "POST /games/poker/quote": (body) => ({ stake: 100, description: "Mesa libre · ciegas 2/4", breakdown: `Se reserva ${JSON.stringify((body as { options: unknown }).options)}.` }),
+    });
+    renderApp(<Poker />, { api });
+
+    expect(await screen.findByRole("radiogroup", { name: "Recompras" })).toBeInTheDocument(); // torneo por defecto
+    await userEvent.click(within(screen.getByRole("radiogroup", { name: "Modalidad" })).getByRole("radio", { name: "Mesa libre" }));
+
+    expect(screen.queryByRole("radiogroup", { name: "Recompras" })).not.toBeInTheDocument();
+    expect(await screen.findByText(/"mode":1/)).toBeInTheDocument();
+    expect(screen.queryByText(/rebuys/)).not.toBeInTheDocument();
   });
 
   it("lists the open tables of Poker when the player is not sitting anywhere", async () => {

@@ -14,7 +14,7 @@ public sealed record PokerEvent(int Seat, string Kind, long? Amount = null, bool
 public sealed record PokerShowdown(int Seat, IReadOnlyList<int> Cards, string Category, bool Won);
 
 /// <summary>Un pozo de la mano (el principal o uno lateral): cuanto tiene, quienes pueden ganarlo (los que aportaron hasta ese nivel y siguen en la mano) y quienes lo ganaron.</summary>
-public sealed record PokerPot(long Amount, List<int> Eligible, List<int> Winners);
+public sealed record PokerPot(long Amount, List<int> Eligible, List<int> Winners, long Rake = 0);
 
 /// <summary>Un jugador de la mesa: sus cartas, su pila y lo que puso en la mano. Las cartas solo las ve el dueño (y todos si llegan al showdown).</summary>
 public sealed class PokerPlayer
@@ -50,6 +50,15 @@ public sealed class PokerPlayer
 
     /// <summary>Ya tiene su lugar en el ranking de eliminados.</summary>
     public bool Ranked { get; set; }
+
+    /// <summary>Mesa libre: el asiento esta libre (nadie sentado).</summary>
+    public bool Vacant { get; set; }
+
+    /// <summary>Mesa libre: fichas recargadas que entran a la pila al empezar la mano siguiente (no se cambia la pila en plena mano).</summary>
+    public long PendingChips { get; set; }
+
+    /// <summary>Mesa libre: pidio levantarse; sigue "en automatico" (pasa o se retira) y se va con su pila al terminar la mano.</summary>
+    public bool LeaveAfterHand { get; set; }
 }
 
 /// <summary>
@@ -90,6 +99,27 @@ public sealed class PokerState
 
     /// <summary>Los asientos eliminados, del primero al ultimo en irse: ordena el ranking.</summary>
     public List<int> Eliminated { get; set; } = [];
+
+    /// <summary>Mesa libre (no es un torneo): no termina; se entra, se recarga y se sale cuando se quiere.</summary>
+    public bool Cash { get; set; }
+
+    /// <summary>El rake de la mesa libre en milesimas del pozo, lo recaudado en total y lo de la ultima mano.</summary>
+    public int RakePermille { get; set; }
+
+    public long RakeTotal { get; set; }
+
+    public long HandRake { get; set; }
+
+    /// <summary>La pila minima y maxima con la que se puede estar sentado en una mesa libre.</summary>
+    public long MinEntry { get; set; }
+
+    public long MaxEntry { get; set; }
+
+    /// <summary>Mesa libre sin mano en juego: no alcanzan jugadores con fichas (hacen falta 2). Se arranca sola al sentarse alguien.</summary>
+    public bool Waiting { get; set; }
+
+    /// <summary>Quienes se levantaron y lo que se llevan, hasta que la plataforma los liquida (<see cref="PokerGame.DrainCashOuts"/>).</summary>
+    public List<CashOut> CashOuts { get; set; } = [];
 
     public int Dealer { get; set; }
 
@@ -146,7 +176,7 @@ public sealed class PokerState
     public int HandsToNextLevel() => LevelHands - ((HandNo - 1) % LevelHands);
 }
 
-public sealed record PokerPlayerView(int Seat, long Stack, long Bet, bool Folded, bool AllIn, bool Acted, IReadOnlyList<int>? Cards, int CardCount, bool Out, int RebuysLeft, bool AwaitingRebuy);
+public sealed record PokerPlayerView(int Seat, long Stack, long Bet, bool Folded, bool AllIn, bool Acted, IReadOnlyList<int>? Cards, int CardCount, bool Out, int RebuysLeft, bool AwaitingRebuy, bool Vacant, long PendingChips, bool Leaving);
 
 /// <summary>Lo que ve un asiento: sus cartas, las comunitarias, el pozo, que debe pagar y que puede hacer (con los limites de una subida). Nunca las cartas de otros antes del showdown.</summary>
 public sealed record PokerView(
@@ -183,7 +213,14 @@ public sealed record PokerView(
     long Fee,
     long PrizePool,
     IReadOnlyList<long> Prizes,
-    IReadOnlyList<int> Ranking);
+    IReadOnlyList<int> Ranking,
+    bool Cash,
+    bool Waiting,
+    int RakePermille,
+    long RakeTotal,
+    long HandRake,
+    long MinEntry,
+    long MaxEntry);
 
 /// <summary>
 /// Texas Hold'em de 2 a 6 jugadores, mano tras mano: cada uno entra con la misma cantidad de fichas y se juegan manos completas (cuatro rondas de apuestas con ciegas y limite libre) hasta
@@ -216,12 +253,13 @@ public sealed class PokerGame : ITableGame, IConfigurableGame
 
     public IReadOnlyList<TableOption> Options { get; } =
     [
-        new("bigBlind", "Ciega grande", "La ciega chica es la mitad. La entrada tiene que valer entre 20 y 100 ciegas grandes y las ciegas suben solas cada 10 manos.", "number", Min: 2),
-        new("rebuys", "Recompras", "Cuántas veces puede volver a entrar quien se queda sin fichas (cuesta una entrada más su comisión). Lo que reservás de más se devuelve si no lo usás.", "choice", Choices: [0, 1, 2], Default: 0),
+        new("mode", "Modalidad", "Torneo: entrada fija, ciegas que suben y premio para los primeros. Mesa libre: te sentás con las fichas que quieras (dentro de un rango), recargás y te levantás cuando quieras cobrando tu pila; la casa cobra un rake de los pozos.", "choice", Choices: [0, 1], Default: 0, Labels: ["Torneo", "Mesa libre"]),
+        new("bigBlind", "Ciega grande", "La ciega chica es la mitad. La entrada tiene que valer entre 20 y 100 ciegas grandes. En un torneo las ciegas suben solas cada 10 manos; en la mesa libre quedan fijas.", "number", Min: 2),
+        new("rebuys", "Recompras", "Cuántas veces puede volver a entrar quien se queda sin fichas (cuesta una entrada más su comisión). Lo que reservás de más se devuelve si no lo usás.", "choice", Choices: [0, 1, 2], Default: 0, VisibleWhen: "mode=0"),
     ];
 
     /// <summary>Lo que se elige al crear la mesa, ya validado: las ciegas, las recompras y lo que fija la casa (comision, niveles), que queda guardado en la mesa.</summary>
-    private sealed record PokerTableOptions(long BigBlind, int Rebuys, long Fee, int LevelHands, int GrowthPercent);
+    private sealed record PokerTableOptions(long BigBlind, int Rebuys, long Fee, int LevelHands, int GrowthPercent, bool Cash = false, int RakePermille = 0, long MinEntry = 0, long MaxEntry = 0);
 
     private static long DefaultBigBlind(long buyIn) => 2 * Math.Max(1, buyIn / 50);
 
@@ -229,8 +267,16 @@ public sealed class PokerGame : ITableGame, IConfigurableGame
     {
         var bigBlind = DefaultBigBlind(buyIn);
         var rebuys = 0;
+        var cash = false;
         if (options is { ValueKind: JsonValueKind.Object } o)
         {
+            if (o.TryGetProperty("mode", out var mode) && mode.ValueKind != JsonValueKind.Null)
+            {
+                cash = mode.ValueKind == JsonValueKind.Number && mode.TryGetInt32(out var m) && m is 0 or 1
+                    ? mode.GetInt32() == 1
+                    : throw new TableRuleException("bad_option", "La modalidad es 0 (torneo) o 1 (mesa libre).");
+            }
+
             if (o.TryGetProperty("bigBlind", out var bb) && bb.ValueKind != JsonValueKind.Null)
             {
                 bigBlind = bb.ValueKind == JsonValueKind.Number && bb.TryGetInt64(out var v) ? v : throw new TableRuleException("bad_option", "La ciega grande tiene que ser un numero entero.");
@@ -257,6 +303,27 @@ public sealed class PokerGame : ITableGame, IConfigurableGame
             throw new TableRuleException("bad_rebuys", $"Las recompras van de 0 a {_rules.MaxRebuys}.");
         }
 
+        if (cash)
+        {
+            if (rebuys != 0)
+            {
+                throw new TableRuleException("bad_rebuys", "La mesa libre no tiene recompras: se recarga entre manos.");
+            }
+
+            var min = bigBlind * _rules.MinEntryInBigBlinds;
+            var max = bigBlind * _rules.MaxEntryInBigBlinds;
+            var rakeText = _rules.RakePermille % 10 == 0 ? $"{_rules.RakePermille / 10} %" : $"{_rules.RakePermille / 10d:0.0} %";
+            var cashOptions = new PokerTableOptions(bigBlind, 0, 0, 0, 0, Cash: true, RakePermille: _rules.RakePermille, MinEntry: min, MaxEntry: max);
+            return new TableQuote(
+                buyIn,
+                JsonSerializer.Serialize(cashOptions, OptionsJson),
+                $"Mesa libre · ciegas {bigBlind / 2}/{bigBlind} · entrada de {min} a {max} fichas · rake {rakeText}",
+                $"Te sentás con {buyIn} fichas (se reservan). Podés recargar entre manos hasta {max} y levantarte cuando quieras cobrando tu pila. La casa cobra {rakeText} de cada pozo que llega al flop.",
+                Continuous: true,
+                MinEntry: min,
+                MaxEntry: max);
+        }
+
         var fee = buyIn * _rules.EntryFeePermille / 1000;
         var entries = 1 + rebuys;
         var stake = (buyIn + fee) * entries;
@@ -277,7 +344,19 @@ public sealed class PokerGame : ITableGame, IConfigurableGame
             return false;
         }
 
+        if (s.Cash)
+        {
+            return seat >= 0 && seat < s.Seats && !s.Players[seat].Vacant; // cualquiera sentado puede levantarse; las jugadas las valida Apply
+        }
+
         return s.Done ? seat == s.Current || s.Players[seat].AwaitingRebuy : seat == s.Current;
+    }
+
+    /// <summary>Quien se esta levantando juega en automatico: pasa o se retira enseguida, sin esperar sus 30 segundos.</summary>
+    public bool IsPassive(string state, int seat)
+    {
+        var s = Deserialize(state);
+        return seat >= 0 && seat < s.Seats && (s.Players[seat].LeaveAfterHand || s.Players[seat].Vacant);
     }
 
     public string Start(GameStartContext context)
@@ -292,6 +371,10 @@ public sealed class PokerGame : ITableGame, IConfigurableGame
         {
             Seats = n,
             BuyIn = context.BuyIn,
+            Cash = chosen.Cash,
+            RakePermille = chosen.RakePermille,
+            MinEntry = chosen.MinEntry,
+            MaxEntry = chosen.MaxEntry,
             BigBlind0 = chosen.BigBlind,
             Fee = chosen.Fee,
             Rebuys = chosen.Rebuys,
@@ -302,6 +385,22 @@ public sealed class PokerGame : ITableGame, IConfigurableGame
             TableId = context.TableId.ToString("N"),
             Winnings = [.. Enumerable.Repeat(0L, n)],
         };
+        if (state.Cash)
+        {
+            // Mesa libre: arranca vacia y esperando; cada uno se sienta con su pila (SeatPlayer) y la mano empieza sola cuando hay dos con fichas.
+            for (var seat = 0; seat < n; seat++)
+            {
+                state.Players.Add(new PokerPlayer { Vacant = true, Out = true, Folded = true });
+            }
+
+            state.Waiting = true;
+            state.Done = true;
+            state.Street = "done";
+            state.BigBlind = state.BigBlind0;
+            state.SmallBlind = state.BigBlind0 / 2;
+            return Serialize(state);
+        }
+
         for (var seat = 0; seat < n; seat++)
         {
             state.Players.Add(new PokerPlayer { Stack = context.BuyIn });
@@ -360,7 +459,8 @@ public sealed class PokerGame : ITableGame, IConfigurableGame
             p.StartStack = p.Stack;
         }
 
-        s.BigBlind = BigBlindAt(s.BigBlind0, handNo, s.LevelHands, s.GrowthPercent);
+        s.HandRake = 0;
+        s.BigBlind = s.Cash ? s.BigBlind0 : BigBlindAt(s.BigBlind0, handNo, s.LevelHands, s.GrowthPercent);
         s.SmallBlind = s.BigBlind / 2;
 
         var active = Enumerable.Range(0, s.Seats).Where(i => !s.Players[i].Out).ToList();
@@ -398,7 +498,7 @@ public sealed class PokerGame : ITableGame, IConfigurableGame
     public TurnInfo? Turn(string state)
     {
         var s = Deserialize(state);
-        if (s.Over)
+        if (s.Over || s.Waiting)
         {
             return null;
         }
@@ -415,21 +515,57 @@ public sealed class PokerGame : ITableGame, IConfigurableGame
         }
 
         var (type, to) = ParseAction(action);
+        if (type == "leave")
+        {
+            if (!s.Cash)
+            {
+                throw new TableRuleException("cannot_leave", "En un torneo no se puede salir en plena partida.");
+            }
+
+            LeaveSeat(s, seat);
+            TrimEvents(s);
+            return Serialize(s);
+        }
+
         if (s.Done)
         {
             // Entre manos: quien se quedo sin fichas decide si recompra; la pausa vencida (o quien tiene el turno) pasa a la mano siguiente.
             switch (type)
             {
                 case "rebuy":
+                    if (s.Cash)
+                    {
+                        throw new TableRuleException("use_topup", "En la mesa libre se recarga con el boton Recargar.");
+                    }
+
                     Rebuy(s, seat);
                     break;
                 case "decline":
-                    Decline(s, seat);
+                    if (s.Cash)
+                    {
+                        LeaveSeat(s, seat); // el que se quedo sin fichas y no recarga se va
+                    }
+                    else
+                    {
+                        Decline(s, seat);
+                    }
+
                     break;
                 case "next":
                     if (seat != s.Current)
                     {
                         throw new TableRuleException("not_your_turn", "No es tu turno.");
+                    }
+
+                    if (s.Cash)
+                    {
+                        ResolveCashSeats(s);
+                        if (!s.Waiting)
+                        {
+                            StartHand(s, s.HandNo + 1);
+                        }
+
+                        break;
                     }
 
                     ResolvePending(s);
@@ -531,7 +667,10 @@ public sealed class PokerGame : ITableGame, IConfigurableGame
             p.Cards.Count,
             p.Out,
             s.Rebuys - p.RebuysUsed,
-            p.AwaitingRebuy)).ToList();
+            p.AwaitingRebuy,
+            p.Vacant,
+            seat == i ? p.PendingChips : 0,
+            p.LeaveAfterHand)).ToList();
 
         var handSeed = HandSeed(s.Seed, s.TableId, s.HandNo);
         var myTurn = seat is { } who && who == s.Current && !s.Done;
@@ -551,7 +690,7 @@ public sealed class PokerGame : ITableGame, IConfigurableGame
             seat is { } q ? Math.Max(0, s.CurrentBet - s.Players[q].Bet) : 0,
             minTo,
             maxTo,
-            myTurn ? Legal(s, seat!.Value) : s is { Done: true, Over: false } && seat is { } waiting && s.Players[waiting].AwaitingRebuy ? ["decline", "rebuy"] : [],
+            myTurn ? Legal(s, seat!.Value) : s is { Done: true, Over: false, Cash: false } && seat is { } waiting && s.Players[waiting].AwaitingRebuy ? ["decline", "rebuy"] : [],
             s.Showdown,
             s.Winnings,
             s.Done,
@@ -563,14 +702,21 @@ public sealed class PokerGame : ITableGame, IConfigurableGame
             s.Pots,
             s.SmallBlind,
             s.BigBlind,
-            BigBlindAt(s.BigBlind0, s.HandNo + s.HandsToNextLevel(), s.LevelHands, s.GrowthPercent),
-            s.HandsToNextLevel(),
+            s.Cash ? s.BigBlind0 : BigBlindAt(s.BigBlind0, s.HandNo + s.HandsToNextLevel(), s.LevelHands, s.GrowthPercent),
+            s.Cash ? 0 : s.HandsToNextLevel(),
             s.Rebuys,
             s.BuyIn,
             s.Fee,
-            s.PrizePool,
-            Prizes(s.PrizePool, s.Seats),
-            s.Over ? Ranking(s) : []);
+            s.Cash ? 0 : s.PrizePool,
+            s.Cash ? [] : Prizes(s.PrizePool, s.Seats),
+            s.Over ? Ranking(s) : [],
+            s.Cash,
+            s.Waiting,
+            s.RakePermille,
+            s.RakeTotal,
+            s.HandRake,
+            s.MinEntry,
+            s.MaxEntry);
     }
 
     public GameOutcome? Outcome(string state)
@@ -797,15 +943,21 @@ public sealed class PokerGame : ITableGame, IConfigurableGame
             var contest = showdown && eligible.Count > 1;
             var best = contest ? eligible.Max(i => scores![i]) : 0;
             var winners = contest ? eligible.Where(i => scores![i] == best).ToList() : [.. eligible];
-            var share = pot.Amount / winners.Count;
+            // Rake (mesa libre): un porcentaje de cada pozo en juego, sin tope, redondeado hacia abajo, y solo si la mano llego al flop ("no flop, no drop"). Una apuesta que nadie igualo
+            // (pozo de un solo jugador que vuelve a su dueño) no paga rake.
+            var rake = s.RakePermille > 0 && s.Board.Count >= 3 && (eligible.Count > 1 || s.Pots.Count == 1) ? pot.Amount * s.RakePermille / 1000 : 0;
+            var distributable = pot.Amount - rake;
+            s.HandRake += rake;
+            s.RakeTotal += rake;
+            var share = distributable / winners.Count;
             foreach (var w in winners)
             {
                 s.Winnings[w] += share;
             }
 
             // El resto de una division va al primero de los ganadores a la izquierda del boton.
-            s.Winnings[winners.OrderBy(w => (w - s.Dealer - 1 + s.Seats) % s.Seats).First()] += pot.Amount % winners.Count;
-            s.Pots[k] = pot with { Winners = winners };
+            s.Winnings[winners.OrderBy(w => (w - s.Dealer - 1 + s.Seats) % s.Seats).First()] += distributable % winners.Count;
+            s.Pots[k] = pot with { Winners = winners, Rake = rake };
         }
 
         if (showdown)
@@ -828,11 +980,11 @@ public sealed class PokerGame : ITableGame, IConfigurableGame
         }
 
         // Quien se queda sin fichas: si le quedan recompras decide en la pausa; si no, queda afuera.
-        foreach (var i in Enumerable.Range(0, s.Seats).Where(i => !s.Players[i].Out && s.Players[i].Stack == 0))
+        foreach (var i in Enumerable.Range(0, s.Seats).Where(i => !s.Players[i].Out && !s.Players[i].Vacant && s.Players[i].Stack == 0))
         {
-            if (s.Players[i].RebuysUsed < s.Rebuys)
+            if (s.Cash || s.Players[i].RebuysUsed < s.Rebuys)
             {
-                s.Players[i].AwaitingRebuy = true;
+                s.Players[i].AwaitingRebuy = true; // mesa libre: puede recargar (con fichas nuevas reservadas) o se va al empezar la mano siguiente
             }
             else
             {
@@ -842,11 +994,189 @@ public sealed class PokerGame : ITableGame, IConfigurableGame
 
         var waiting = s.Players.Any(p => p.AwaitingRebuy);
         s.PauseSeconds = waiting ? _rules.RebuyWindowSeconds : _rules.BetweenHandsSeconds;
-        if (!waiting)
+        if (!waiting && !s.Cash)
         {
             SettleRanks(s);
             s.Over = s.Players.Count(p => p.Stack > 0) <= 1;
         }
+    }
+
+    // ---- Mesa libre ----
+
+    private static int ActiveCount(PokerState s) => s.Players.Count(p => !p.Vacant && !p.Out && p.Stack > 0);
+
+    /// <summary>Se sienta a alguien en un asiento libre con su pila. Se juega desde la mano siguiente; si con el hay dos jugadores con fichas y la mesa esperaba, la mano arranca ya.</summary>
+    public string SeatPlayer(string state, int seat, long chips, DateTimeOffset now)
+    {
+        var s = Deserialize(state);
+        if (!s.Cash)
+        {
+            throw new TableRuleException("not_cash", "Esta mesa no es una mesa libre.");
+        }
+
+        if (seat < 0 || seat >= s.Seats || !s.Players[seat].Vacant)
+        {
+            throw new TableRuleException("seat_taken", "Ese asiento no esta libre.");
+        }
+
+        if (chips < s.MinEntry || chips > s.MaxEntry)
+        {
+            throw new TableRuleException("bad_entry", $"La entrada va de {s.MinEntry} a {s.MaxEntry} fichas.");
+        }
+
+        s.Players[seat] = new PokerPlayer { Stack = chips, StartStack = chips, Folded = true }; // espera la mano siguiente
+        s.Events.Add(new PokerEvent(seat, "sit", chips));
+        if (s.Waiting && ActiveCount(s) >= 2)
+        {
+            s.Waiting = false;
+            StartHand(s, s.HandNo + 1);
+        }
+
+        TrimEvents(s);
+        return Serialize(s);
+    }
+
+    /// <summary>
+    /// Suma fichas ya reservadas a quien esta sentado. Quien se quedo sin fichas y espera decidir vuelve a jugar de inmediato con la recarga (tiene que ser al menos la entrada minima); el resto la suma a su
+    /// pila al empezar la mano siguiente, sin pasar de la pila maxima.
+    /// </summary>
+    public string AddChips(string state, int seat, long chips, DateTimeOffset now)
+    {
+        var s = Deserialize(state);
+        if (!s.Cash)
+        {
+            throw new TableRuleException("not_cash", "Esta mesa no es una mesa libre.");
+        }
+
+        if (seat < 0 || seat >= s.Seats || s.Players[seat].Vacant || chips <= 0)
+        {
+            throw new TableRuleException("not_seated", "No estas sentado en la mesa.");
+        }
+
+        var p = s.Players[seat];
+        if (p.AwaitingRebuy)
+        {
+            if (chips < s.MinEntry || chips > s.MaxEntry)
+            {
+                throw new TableRuleException("bad_entry", $"Para volver a jugar la recarga va de {s.MinEntry} a {s.MaxEntry} fichas.");
+            }
+
+            p.Stack = chips;
+            p.StartStack = chips;
+            p.AwaitingRebuy = false;
+            p.LeaveAfterHand = false;
+            s.Events.Add(new PokerEvent(seat, "rebuy", chips));
+            if (!s.Players.Any(o => o.AwaitingRebuy))
+            {
+                s.PauseSeconds = _rules.AfterDecisionsSeconds;
+            }
+        }
+        else
+        {
+            if (p.Stack + p.PendingChips + chips > s.MaxEntry)
+            {
+                throw new TableRuleException("too_much", $"Tu pila no puede pasar de {s.MaxEntry} fichas.");
+            }
+
+            p.PendingChips += chips;
+            s.Events.Add(new PokerEvent(seat, "topup", chips));
+        }
+
+        TrimEvents(s);
+        return Serialize(s);
+    }
+
+    /// <summary>Quien se levanta: si no esta en la mano (entre manos, o ya retirado sin haber puesto nada) se va ya con su pila; si esta jugando, sigue en automatico y se va al terminar la mano.</summary>
+    private static void LeaveSeat(PokerState s, int seat)
+    {
+        if (seat < 0 || seat >= s.Seats || s.Players[seat].Vacant)
+        {
+            throw new TableRuleException("not_seated", "No estas sentado en la mesa.");
+        }
+
+        var p = s.Players[seat];
+        p.LeaveAfterHand = true;
+        if (s.Done || s.Waiting || (p.Folded && p.Total == 0))
+        {
+            CashOutSeat(s, seat, includeHand: false);
+        }
+        else
+        {
+            s.Events.Add(new PokerEvent(seat, "leaving"));
+        }
+    }
+
+    /// <summary>Libera el asiento y anota lo que se lleva: su pila mas lo recargado (y, si cierra la mesa en plena mano, lo que puso en ella).</summary>
+    private static void CashOutSeat(PokerState s, int seat, bool includeHand)
+    {
+        var p = s.Players[seat];
+        var chips = p.Stack + p.PendingChips + (includeHand ? p.Total : 0);
+        s.CashOuts.Add(new CashOut(seat, chips));
+        s.Events.Add(new PokerEvent(seat, "leave", chips));
+        s.Players[seat] = new PokerPlayer { Vacant = true, Out = true, Folded = true };
+    }
+
+    /// <summary>Entre mano y mano: se van los que pidieron levantarse y los que se quedaron sin fichas y no recargaron, la recarga entra a las pilas y, si no alcanzan dos con fichas, la mesa espera.</summary>
+    private static void ResolveCashSeats(PokerState s)
+    {
+        for (var seat = 0; seat < s.Seats; seat++)
+        {
+            var p = s.Players[seat];
+            if (p.Vacant)
+            {
+                continue;
+            }
+
+            if (p.AwaitingRebuy || p.LeaveAfterHand)
+            {
+                CashOutSeat(s, seat, includeHand: false);
+            }
+            else if (p.PendingChips > 0)
+            {
+                p.Stack += p.PendingChips;
+                p.PendingChips = 0;
+            }
+        }
+
+        s.Waiting = ActiveCount(s) < 2;
+    }
+
+    /// <summary>Saca del estado a quienes se levantaron y devuelve lo que se llevan.</summary>
+    public (string State, IReadOnlyList<CashOut> CashOuts) DrainCashOuts(string state)
+    {
+        var s = Deserialize(state);
+        if (s.CashOuts.Count == 0)
+        {
+            return (state, []);
+        }
+
+        var drained = s.CashOuts.ToList();
+        s.CashOuts = [];
+        return (Serialize(s), drained);
+    }
+
+    /// <summary>Cierra la mesa: todos los sentados se levantan con lo que tienen (y, si habia una mano en juego, lo que pusieron en ella vuelve a su dueño).</summary>
+    public string Shutdown(string state)
+    {
+        var s = Deserialize(state);
+        if (!s.Cash)
+        {
+            return state;
+        }
+
+        var midHand = !s.Done && !s.Waiting;
+        for (var seat = 0; seat < s.Seats; seat++)
+        {
+            if (!s.Players[seat].Vacant)
+            {
+                CashOutSeat(s, seat, includeHand: midHand);
+            }
+        }
+
+        s.Waiting = true;
+        s.Done = true;
+        s.Street = "done";
+        return Serialize(s);
     }
 
     /// <summary>Queda afuera (sin recompras): se anota el evento; su lugar en el ranking se fija cuando se resuelven todos los de la mano (<see cref="SettleRanks"/>).</summary>

@@ -1,7 +1,7 @@
 import { useRef, useState, type FormEvent, type ReactNode } from "react";
 import { ApiError } from "../api/client";
 import { useCreateTable, useJoinByCode, useJoinTable, useLeaveTable, useStartTable, useTable, useTableBots, useTableQuote, useTableRules, useTables } from "../api/hooks";
-import type { TableRules, TableState, TableSummary } from "../api/types";
+import type { TableOptionDef, TableRules, TableState, TableSummary } from "../api/types";
 import { formatChips } from "../lib/format";
 import { detailedErrorMessage } from "../lib/messages";
 import { useRealtime } from "../realtime/RealtimeProvider";
@@ -79,11 +79,13 @@ function TableList({ gameId, gameName, tables, loading, failed, onEnter }: { gam
   const [codeError, setCodeError] = useState<string | null>(null);
   const { balance } = useRealtime();
 
-  const open = (tables ?? []).filter((t) => t.status === "Open");
+  const open = (tables ?? []).filter((t) => t.status === "Open" || (t.status === "Playing" && t.continuous));
+  const [amounts, setAmounts] = useState<Record<string, number>>({});
+  const entryFor = (table: TableSummary): number => amounts[table.id] ?? table.minEntry ?? table.buyIn;
 
   const sit = (table: TableSummary) => {
     setError(null);
-    join.mutate({ tableId: table.id }, { onSuccess: () => onEnter(table.id), onError: (e) => setError(detailedErrorMessage(e)) });
+    join.mutate({ tableId: table.id, ...(table.continuous ? { amount: entryFor(table) } : {}) }, { onSuccess: () => onEnter(table.id), onError: (e) => setError(detailedErrorMessage(e)) });
   };
 
   const submitCode = (event: FormEvent) => {
@@ -111,14 +113,32 @@ function TableList({ gameId, gameName, tables, loading, failed, onEnter }: { gam
               <div>
                 <p className="tl-table__name">{table.name}</p>
                 <p className="muted tl-table__meta">
-                  Entrada de {formatChips(table.buyIn)} fichas · {table.players}/{table.maxPlayers} jugadores{table.bots > 0 ? ` (${plural(table.bots, "bot", "bots")})` : ""}{table.description ? ` · ${table.description}` : ""}
+                  {table.continuous ? "" : `Entrada de ${formatChips(table.buyIn)} fichas · `}{table.players}/{table.maxPlayers} jugadores{table.bots > 0 ? ` (${plural(table.bots, "bot", "bots")})` : ""}{table.description ? ` · ${table.description}` : ""}
                 </p>
               </div>
+              {table.continuous && (
+                <label className="field tl-cash-amount">
+                  <span>Entrar con</span>
+                  <input
+                    type="number"
+                    inputMode="numeric"
+                    aria-label={`Fichas para entrar a ${table.name}`}
+                    min={table.minEntry}
+                    max={table.maxEntry}
+                    value={entryFor(table)}
+                    onChange={(e) => setAmounts((a) => ({ ...a, [table.id]: Math.trunc(Number(e.target.value)) }))}
+                  />
+                </label>
+              )}
               <button
                 type="button"
                 className="btn btn--gold"
                 aria-label={`Unirme a ${table.name}`}
-                disabled={join.isPending || table.players >= table.maxPlayers || (balance.ready && (table.stake ?? table.buyIn) > balance.available)}
+                disabled={
+                  join.isPending ||
+                  table.players >= table.maxPlayers ||
+                  (table.continuous ? entryFor(table) < (table.minEntry ?? 0) || entryFor(table) > (table.maxEntry ?? Infinity) || (balance.ready && entryFor(table) > balance.available) : balance.ready && (table.stake ?? table.buyIn) > balance.available)
+                }
                 onClick={() => sit(table)}
               >
                 {table.players >= table.maxPlayers ? "Llena" : "Unirme"}
@@ -162,9 +182,16 @@ function CreateTable({ gameId, gameName, rules, rulesFailed, onCreated }: { game
   const gameOptions = rules?.options ?? [];
   const hasOptions = gameOptions.length > 0;
   // Lo elegido de las opciones del juego: las de tipo "choice" siempre llevan valor (el elegido o el por defecto); las numericas solo si se escribio algo.
+  const valueOf = (def: TableOptionDef): number | null => optionValues[def.key] ?? (def.kind === "choice" ? def.default ?? null : null);
+  const isVisible = (def: TableOptionDef): boolean => {
+    if (!def.visibleWhen) return true;
+    const [key, expected] = def.visibleWhen.split("=");
+    const other = gameOptions.find((o) => o.key === key);
+    return other !== undefined && String(valueOf(other)) === expected;
+  };
   const chosenOptions: Record<string, number> = {};
-  for (const def of gameOptions) {
-    const value = optionValues[def.key] ?? (def.kind === "choice" ? def.default ?? null : null);
+  for (const def of gameOptions.filter(isVisible)) {
+    const value = valueOf(def);
     if (value !== null && value !== undefined && Number.isFinite(value)) chosenOptions[def.key] = value;
   }
   const quote = useTableQuote(gameId, { buyIn: entry, maxPlayers: seats, options: chosenOptions }, hasOptions && entryValid);
@@ -223,17 +250,17 @@ function CreateTable({ gameId, gameName, rules, rulesFailed, onCreated }: { game
           </div>
         </div>
         <p className="tl-hint">Cuántos asientos tiene la mesa{rules.allowsBots === false ? "." : "; los que no ocupen personas los podés completar con bots."}</p>
-        {gameOptions.map((def) => (
+        {gameOptions.filter(isVisible).map((def) => (
           <div key={def.key} className="tl-option">
             {def.kind === "choice" ? (
               <div className="field" role="radiogroup" aria-label={def.label}>
                 <span>{def.label}</span>
                 <div className="chips">
-                  {(def.choices ?? []).map((n) => {
+                  {(def.choices ?? []).map((n, i) => {
                     const on = (optionValues[def.key] ?? def.default ?? null) === n;
                     return (
                       <button key={n} type="button" role="radio" aria-checked={on} className={`choice choice--stake ${on ? "choice--on" : ""}`} onClick={() => setOptionValues((v) => ({ ...v, [def.key]: n }))}>
-                        {n}
+                        {def.labels?.[i] ?? n}
                       </button>
                     );
                   })}

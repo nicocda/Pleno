@@ -1,6 +1,6 @@
 import { useQueryClient } from "@tanstack/react-query";
-import { useEffect, useState } from "react";
-import { queryKeys, useTableAction } from "../api/hooks";
+import { useEffect, useRef, useState } from "react";
+import { queryKeys, useLeaveTable, useTableAction, useTopUp } from "../api/hooks";
 import type { PokerAction, PokerPlayer, PokerView, TableSeat } from "../api/types";
 import { Confetti } from "../components/Confetti";
 import { TablesLobby, type LiveTable } from "../components/TablesLobby";
@@ -19,7 +19,7 @@ export function Poker() {
       <header>
         <p className="eyebrow">Poker</p>
         <h1 className="display">Texas Hold'em</h1>
-        <p className="muted">Torneo de 2 a 6 jugadores: elegís las ciegas y las recompras, cada uno entra con la misma pila y se juegan manos una tras otra (cuatro rondas de apuestas y showdown) con las ciegas subiendo cada 10 manos, hasta que uno se queda con todas las fichas. El premio se reparte entre los primeros. Cada mano se baraja con una semilla comprometida de antemano y se revela al terminar la mano.</p>
+        <p className="muted">De 2 a 6 jugadores, en dos modalidades. <strong>Torneo:</strong> elegís las ciegas y las recompras, cada uno entra con la misma pila y se juegan manos con las ciegas subiendo cada 10 manos hasta que uno se queda con todo; el premio se reparte entre los primeros. <strong>Mesa libre:</strong> te sentás con las fichas que quieras, recargás y te levantás cuando quieras cobrando tu pila; la casa cobra un rake de cada pozo. Cada mano se baraja con una semilla comprometida de antemano y se revela al terminar.</p>
       </header>
       <TablesLobby<PokerView> gameId={GAME_ID} gameName="Poker" renderGame={(table, leave) => <PokerTable table={table} onLeave={leave} />} />
       <Rules />
@@ -40,6 +40,8 @@ function Rules() {
         <li>Límite libre: podés subir hasta todo lo que tenés. Si no te alcanza para subir pero sí para igualar, igualar es all-in.</li>
         <li>Hay 4 rondas de apuestas (preflop, flop, turn y river). Si alguien va all-in por menos que los demás se arma un pozo lateral: cada pozo lo gana la mejor mano entre quienes llegaron a ese nivel, y lo que nadie igualó vuelve a su dueño. Si todos se retiran menos uno, se lleva el pozo sin mostrar cartas; si no, hay showdown.</li>
         <li>Quien se queda sin fichas (y no recompra) queda eliminado. Entre mano y mano hay una pausa de unos segundos.</li>
+        <li><strong>Mesa libre:</strong> la mesa nace en juego esperando jugadores y la mano arranca sola cuando hay dos con fichas. Entrás con entre 20 y 100 ciegas grandes, en cualquier momento y en un asiento libre (jugás desde la mano siguiente). Podés <strong>recargar</strong> hasta 100 ciegas grandes (la recarga entra a tu pila en la mano siguiente) y <strong>levantarte</strong> cuando quieras: cobrás tu pila al terminar la mano. Si te quedás sin fichas tenés unos segundos para recargar o te vas. Las ciegas no suben.</li>
+        <li><strong>Rake:</strong> la casa se queda con un porcentaje de cada pozo que llega al flop (sin tope, redondeado hacia abajo; si la mano termina antes del flop no se cobra nada). Las apuestas que nadie iguala no pagan rake.</li>
         <li>Cada turno dura 30 segundos. Si no actuás, pasás (si es gratis) o te retirás; con 3 turnos vencidos seguidos quedás ausente y la mesa pasa o se retira por vos (no apuesta). No hay bots y no se puede salir en plena partida.</li>
       </ul>
     </section>
@@ -72,6 +74,11 @@ function PokerTable({ table, onLeave }: { table: LiveTable<PokerView>; onLeave: 
   const [sawPlaying, setSawPlaying] = useState(false);
   const [winClosed, setWinClosed] = useState(false);
   const [verification, setVerification] = useState<Verification>(null);
+  const leave = useLeaveTable(GAME_ID);
+  const topUp = useTopUp(GAME_ID, table.id);
+  const [topUpOpen, setTopUpOpen] = useState(false);
+  const [topUpAmount, setTopUpAmount] = useState<string | null>(null); // null = sin tocar: se usa el monto por defecto
+  const topUpKey = useRef<{ fingerprint: string; key: string } | null>(null);
 
   useEffect(() => {
     const id = window.setInterval(() => setNow(Date.now()), 250);
@@ -115,7 +122,43 @@ function PokerTable({ table, onLeave }: { table: LiveTable<PokerView>; onLeave: 
     act.mutate(action, { onError: (e) => setError(detailedErrorMessage(e)) });
   };
 
-  const statusLabel = finished ? (champion !== undefined ? `Terminó la partida: ${nameOf(champion)} se llevó todas las fichas` : "La partida terminó")
+  // Mesa libre: sentado de verdad (el juego ya me sento), esperando que la Wallet confirme mis fichas, y cuanto puedo recargar.
+  const cash = game.cash;
+  const seated = me !== undefined && !me.vacant;
+  const confirmingChips = cash && mySeat !== null && me?.vacant === true;
+  const maxTopUp = me ? Math.max(0, game.maxEntry - me.stack - me.pendingChips) : 0;
+  const mustTopUpToPlay = me?.awaitingRebuy === true; // quedo sin fichas: la recarga minima es la entrada minima
+  const minTopUp = mustTopUpToPlay ? game.minEntry : 1;
+  const defaultTopUp = mustTopUpToPlay ? game.minEntry : Math.min(maxTopUp, game.bigBlind * 20);
+  const topUpValue = topUpAmount === null ? defaultTopUp : Math.trunc(Number(topUpAmount));
+  const topUpValid = Number.isInteger(topUpValue) && topUpValue >= minTopUp && topUpValue <= (mustTopUpToPlay ? game.maxEntry : maxTopUp);
+
+  const submitTopUp = () => {
+    setError(null);
+    const fingerprint = String(topUpValue);
+    if (topUpKey.current?.fingerprint !== fingerprint) topUpKey.current = { fingerprint, key: crypto.randomUUID() };
+    topUp.mutate(
+      { amount: topUpValue, idempotencyKey: topUpKey.current.key },
+      {
+        onSuccess: () => {
+          topUpKey.current = null;
+          setTopUpOpen(false);
+          setTopUpAmount(null);
+        },
+        onError: (e) => setError(detailedErrorMessage(e)),
+      },
+    );
+  };
+
+  const standUp = () => {
+    setError(null);
+    leave.mutate(table.id, { onError: (e) => setError(detailedErrorMessage(e)) });
+  };
+
+  const statusLabel = finished ? (cash ? "La mesa se cerró: se fueron todos" : champion !== undefined ? `Terminó la partida: ${nameOf(champion)} se llevó todas las fichas` : "La partida terminó")
+    : confirmingChips ? "Confirmando tus fichas…"
+    : cash && game.waiting ? "Esperando jugadores: la mano arranca cuando haya dos con fichas"
+    : cash && me?.leaving ? "Te levantás al terminar la mano"
     : handDone ? `${winnerText || "La mano terminó"} · la mano ${game.handNo + 1} empieza en ${turnSeconds} s`
     : mySeat === null ? `Mirando la mano: juega ${nameOf(game.current)}`
     : myTurn ? `Es tu turno (${turnSeconds} s)${game.toCall > 0 ? `: igualá ${formatChips(Math.min(game.toCall, me?.stack ?? game.toCall))} o subí` : ": pasá o apostá"}`
@@ -133,12 +176,22 @@ function PokerTable({ table, onLeave }: { table: LiveTable<PokerView>; onLeave: 
       <section className="card" aria-labelledby="pk-mesa">
         <div className="pk-head">
           <h2 id="pk-mesa" className="section-title">{table.name}</h2>
-          <p className="muted" data-testid="pk-blinds">Mano {game.handNo} · ciegas {formatChips(game.smallBlind)}/{formatChips(game.bigBlind)} (suben a {formatChips(game.nextBigBlind)} en {game.handsToNextLevel === 1 ? "1 mano" : `${game.handsToNextLevel} manos`})</p>
+          {cash ? (
+            <p className="muted" data-testid="pk-blinds">Mesa libre · mano {game.handNo} · ciegas {formatChips(game.smallBlind)}/{formatChips(game.bigBlind)}</p>
+          ) : (
+            <p className="muted" data-testid="pk-blinds">Mano {game.handNo} · ciegas {formatChips(game.smallBlind)}/{formatChips(game.bigBlind)} (suben a {formatChips(game.nextBigBlind)} en {game.handsToNextLevel === 1 ? "1 mano" : `${game.handsToNextLevel} manos`})</p>
+          )}
         </div>
-        <p className="muted" data-testid="pk-prizes">
-          Premio: {formatChips(game.prizePool)} fichas ({game.prizes.map((p, i) => `${i + 1}º ${formatChips(p)}`).join(" · ")})
-          {game.rebuys > 0 ? ` · ${game.rebuys === 1 ? "1 recompra" : `${game.rebuys} recompras`} por jugador` : " · sin recompras"}
-        </p>
+        {cash ? (
+          <p className="muted" data-testid="pk-cash-info">
+            Entrada de {formatChips(game.minEntry)} a {formatChips(game.maxEntry)} fichas · rake de la casa: {game.rakePermille % 10 === 0 ? `${game.rakePermille / 10} %` : `${(game.rakePermille / 10).toFixed(1)} %`} de cada pozo que llega al flop
+          </p>
+        ) : (
+          <p className="muted" data-testid="pk-prizes">
+            Premio: {formatChips(game.prizePool)} fichas ({game.prizes.map((p, i) => `${i + 1}º ${formatChips(p)}`).join(" · ")})
+            {game.rebuys > 0 ? ` · ${game.rebuys === 1 ? "1 recompra" : `${game.rebuys} recompras`} por jugador` : " · sin recompras"}
+          </p>
+        )}
         <p role="status" className="crash-status" data-testid="pk-status">{statusLabel}</p>
 
         <div className="pk-felt">
@@ -155,7 +208,41 @@ function PokerTable({ table, onLeave }: { table: LiveTable<PokerView>; onLeave: 
             ))}
           </ul>
 
-          {me?.awaitingRebuy && handDone && !finished && (
+          {cash && seated && me && !finished && (
+            <div className={`pk-cash notice${mustTopUpToPlay ? " pk-rebuy" : ""}`} role={mustTopUpToPlay ? "alert" : "status"} data-testid={mustTopUpToPlay ? "pk-rebuy" : "pk-cash"}>
+              {mustTopUpToPlay ? (
+                <p>
+                  <strong>Te quedaste sin fichas.</strong> Podés recargar (de {formatChips(game.minEntry)} a {formatChips(game.maxEntry)} fichas) o levantarte. Decidí en {turnSeconds} s o te vas.
+                </p>
+              ) : (
+                <p>
+                  Tu pila: <strong>{formatChips(me.stack)}</strong>
+                  {me.pendingChips > 0 && <span data-testid="pk-pending"> + {formatChips(me.pendingChips)} de recarga (entra a la pila en la mano siguiente)</span>}
+                  {me.leaving && " · te levantás al terminar la mano y cobrás tu pila"}
+                </p>
+              )}
+              {!me.leaving && (
+                <div className="pk-actions__main">
+                  {(mustTopUpToPlay || maxTopUp > 0) && (
+                    <button type="button" className="btn btn--gold" disabled={topUp.isPending} aria-expanded={topUpOpen} onClick={() => setTopUpOpen((o) => !o)}>Recargar</button>
+                  )}
+                  <button type="button" className="btn btn--ghost" disabled={leave.isPending} onClick={standUp}>Levantarme</button>
+                </div>
+              )}
+              {topUpOpen && !me.leaving && (
+                <form className="pk-topup" onSubmit={(e) => { e.preventDefault(); if (topUpValid) submitTopUp(); }}>
+                  <label className="field">
+                    <span>Fichas a recargar</span>
+                    <input type="number" inputMode="numeric" aria-label="Fichas a recargar" min={minTopUp} max={mustTopUpToPlay ? game.maxEntry : maxTopUp} value={topUpAmount ?? String(defaultTopUp)} aria-invalid={!topUpValid} onChange={(e) => setTopUpAmount(e.target.value)} />
+                  </label>
+                  <p className="tl-hint">{mustTopUpToPlay ? `De ${formatChips(game.minEntry)} a ${formatChips(game.maxEntry)} fichas.` : `Hasta ${formatChips(maxTopUp)} fichas más (tu pila no puede pasar de ${formatChips(game.maxEntry)}).`} Se reservan en tu cuenta y entran a la pila en la mano siguiente.</p>
+                  <button type="submit" className="btn btn--gold" disabled={!topUpValid || topUp.isPending}>Confirmar recarga</button>
+                </form>
+              )}
+            </div>
+          )}
+
+          {!cash && me?.awaitingRebuy && handDone && !finished && (
             <div className="pk-rebuy notice" role="alert" data-testid="pk-rebuy">
               <p>
                 <strong>Te quedaste sin fichas.</strong> Podés recomprar por {formatChips(game.entry)} fichas (más {formatChips(game.fee)} de comisión, ya reservadas): te {me.rebuysLeft === 1 ? "queda 1 recompra" : `quedan ${me.rebuysLeft} recompras`}. Decidí en {turnSeconds} s o quedás eliminado.
@@ -206,6 +293,8 @@ function PokerTable({ table, onLeave }: { table: LiveTable<PokerView>; onLeave: 
         )}
       </section>
 
+      {cash && handDone && game.handRake > 0 && <p className="muted" data-testid="pk-rake">La casa cobró {formatChips(game.handRake)} de rake en la mano {game.handNo}.</p>}
+
       {handDone && game.pots.length > 1 && (
         <section className="card" aria-labelledby="pk-pozos">
           <h2 id="pk-pozos" className="section-title">Pozos de la mano {game.handNo}</h2>
@@ -214,7 +303,7 @@ function PokerTable({ table, onLeave }: { table: LiveTable<PokerView>; onLeave: 
               <li key={i} className="pk-showdown__row" data-testid="pk-pot-row">
                 <span className="pk-showdown__name">{i === 0 ? "Pozo principal" : `Pozo lateral ${i}`}</span>
                 <span>{formatChips(pot.amount)} fichas</span>
-                <span>{pot.eligible.length === 1 ? `Vuelve a ${nameOf(pot.eligible[0]!)}` : `Ganó ${pot.winners.map(nameOf).join(" y ")}`}</span>
+                <span>{pot.eligible.length === 1 ? `Vuelve a ${nameOf(pot.eligible[0]!)}` : `Ganó ${pot.winners.map(nameOf).join(" y ")}`}{pot.rake > 0 ? ` · rake ${formatChips(pot.rake)}` : ""}</span>
               </li>
             ))}
           </ul>
@@ -338,9 +427,18 @@ function ActionBar({ game, stack, bet, pending, onAct }: { game: PokerView; stac
 
 function PlayerView({ player, game, seat, name, mine, active, turnSeconds, over, board }: { player: PokerPlayer; game: PokerView; seat: TableSeat | undefined; name: string; mine: boolean; active: boolean; turnSeconds: number; over: boolean; board: number[] }) {
   const entry = game.showdown.find((s) => s.seat === player.seat);
+  if (player.vacant) {
+    return (
+      <li className="pk-player pk-player--empty" data-testid="pk-seat-empty">
+        <p className="pk-player__name">{name}</p>
+        <p className="muted">Libre</p>
+      </li>
+    );
+  }
+
   const classes = ["pk-player", mine ? "pk-player--mine" : "", active ? "pk-player--active" : "", player.folded || player.out ? "pk-player--folded" : "", entry?.won ? "pk-player--winner" : ""].filter(Boolean).join(" ");
   const shown = !mine ? player.cards : null; // las propias se ven grandes abajo
-  const status = player.out ? "Eliminado" : player.awaitingRebuy ? "Decidiendo si recompra" : player.folded ? "Retirado" : player.allIn ? "All-in" : active ? `Turno (${turnSeconds} s)` : "";
+  const status = player.out && !game.cash ? "Eliminado" : player.awaitingRebuy ? (game.cash ? "Sin fichas: decide si recarga" : "Decidiendo si recompra") : player.folded ? "Retirado" : player.allIn ? "All-in" : active ? `Turno (${turnSeconds} s)` : "";
   return (
     <li className={classes} aria-current={active ? "true" : undefined} data-testid="pk-player">
       <p className="pk-player__name">
@@ -350,6 +448,7 @@ function PlayerView({ player, game, seat, name, mine, active, turnSeconds, over,
         {player.seat === game.smallBlindSeat && <span className="pk-tag" aria-label="Ciega chica">SB</span>}
         {player.seat === game.bigBlindSeat && <span className="pk-tag" aria-label="Ciega grande">BB</span>}
         {game.rebuys > 0 && !player.out && <span className="pk-tag" aria-label={`Recompras que le quedan a ${name}`}>♻ {player.rebuysLeft}</span>}
+        {player.leaving && <span className="pk-tag" aria-label={`${name} se levanta al terminar la mano`}>Se levanta</span>}
         {seat?.isBot && <span className="pk-tag pk-tag--bot">Bot</span>}
       </p>
       <p className="pk-player__stack">Pila: <strong>{formatChips(player.stack)}</strong></p>

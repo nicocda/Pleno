@@ -15,7 +15,7 @@ using Microsoft.Extensions.Logging;
 namespace Casino.Modules.Games.Tables;
 
 /// <summary>Un asiento tal como lo ve cualquiera: sin identidad de nadie (solo "Jugador 2" o "Bot 1"), y si es el propio.</summary>
-public sealed record TableSeatView(int Seat, string Name, bool IsBot, bool Mine, bool Ready, bool Away, long? Payout);
+public sealed record TableSeatView(int Seat, string Name, bool IsBot, bool Mine, bool Ready, bool Away, long? Payout, bool Vacant = false);
 
 /// <summary>La mesa tal como la ve un jugador. <c>Game</c> es lo que ve SU asiento segun las reglas del juego (nunca las cartas ocultas de otros).</summary>
 public sealed record TableView(
@@ -39,10 +39,13 @@ public sealed record TableView(
     object? Game,
     IReadOnlyList<long>? Payouts,
     long Stake,
-    string? Description);
+    string? Description,
+    bool Continuous = false,
+    long MinEntry = 0,
+    long MaxEntry = 0);
 
 /// <summary>Una mesa en el listado.</summary>
-public sealed record TableSummary(Guid Id, string GameId, string Name, long BuyIn, int MaxPlayers, int Players, int Bots, TableStatus Status, bool Mine, bool IsPrivate, DateTimeOffset CreatedAt, long Stake, string? Description);
+public sealed record TableSummary(Guid Id, string GameId, string Name, long BuyIn, int MaxPlayers, int Players, int Bots, TableStatus Status, bool Mine, bool IsPrivate, DateTimeOffset CreatedAt, long Stake, string? Description, bool Continuous = false, long MinEntry = 0, long MaxEntry = 0);
 
 public sealed record TableCreated(Guid TableId, string? JoinCode, bool AlreadyCreated);
 
@@ -135,23 +138,44 @@ public sealed partial class TableService(
             OptionsJson = quote.OptionsJson,
             Description = quote.Description,
             MaxPlayers = maxPlayers,
-            Status = TableStatus.Open,
+            Continuous = quote.Continuous,
+            MinEntry = quote.MinEntry,
+            MaxEntry = quote.MaxEntry,
+            Status = quote.Continuous ? TableStatus.Playing : TableStatus.Open,
+            StartedAt = quote.Continuous ? now : null,
+            LastActivityAt = now,
             Commitment = ProvablyFair.Commitment(seed),
             EncryptedSeed = protector.Protect(seed, AadFor(tableId)),
             CreatedAt = now,
         };
-        var bet = SitDown(table, userId, accountId, now);
+        TableBet bet;
+        if (quote.Continuous)
+        {
+            // Mesa continua: nace en juego (esperando jugadores), con todos los asientos y el del que la crea ocupado; se sienta en el juego cuando la Wallet confirma sus fichas.
+            for (var i = 0; i < maxPlayers; i++)
+            {
+                table.Seats.Add(new TableSeat());
+            }
+
+            bet = SitDownAt(table, 0, userId, accountId, buyIn, BetIdFor(tableId, userId), now);
+            table.StateJson = game.Start(new GameStartContext(maxPlayers, seed, tableId, buyIn, now, quote.OptionsJson));
+        }
+        else
+        {
+            bet = SitDown(table, userId, accountId, now);
+        }
 
         session.Insert(table);
         session.Insert(bet);
         await using var outboxSession = outbox.Enroll(session);
-        await outboxSession.PublishAsync(new ReserveStake(bet.Id, accountId, table.ReservedPerSeat, options.ReservationSeconds, gameId));
+        await outboxSession.PublishAsync(new ReserveStake(bet.Id, accountId, quote.Continuous ? buyIn : table.ReservedPerSeat, options.ReservationSeconds, gameId));
         await BroadcastAsync(outboxSession, table, now);
         await session.SaveChangesAsync(ct);
         return new TableCreated(tableId, table.JoinCode, AlreadyCreated: false);
     }
 
-    public Task JoinAsync(Guid userId, Guid accountId, Guid tableId, string? code, CancellationToken ct = default) =>
+    /// <summary>Se sienta en una mesa. En una mesa libre se elige con cuantas fichas (<paramref name="amount"/>, dentro del rango de la mesa) y se entra en un asiento libre aunque la partida ya este en marcha.</summary>
+    public Task JoinAsync(Guid userId, Guid accountId, Guid tableId, string? code, long? amount = null, CancellationToken ct = default) =>
         RetryAsync(async () =>
         {
             await using var session = store.LightweightSession();
@@ -161,7 +185,7 @@ public sealed partial class TableService(
                 return; // ya esta sentado: reintento idempotente
             }
 
-            if (table.Status != TableStatus.Open)
+            if (table.Status != (table.Continuous ? TableStatus.Playing : TableStatus.Open))
             {
                 throw new GamesDomainException(GamesError.TableClosed, "La mesa ya empezo o termino.");
             }
@@ -169,6 +193,33 @@ public sealed partial class TableService(
             if (table.IsPrivate && !string.Equals(table.JoinCode, code?.Trim(), StringComparison.OrdinalIgnoreCase))
             {
                 throw new GamesDomainException(GamesError.InvalidAction, "El codigo de la mesa no es correcto.");
+            }
+
+            if (table.Continuous)
+            {
+                var entry = amount ?? table.MinEntry;
+                if (entry < table.MinEntry || entry > table.MaxEntry)
+                {
+                    throw new GamesDomainException(GamesError.InvalidBet, $"La entrada va de {table.MinEntry} a {table.MaxEntry} fichas.");
+                }
+
+                var free = table.Seats.FindIndex(s => s.IsVacant());
+                if (free < 0)
+                {
+                    throw new GamesDomainException(GamesError.TableClosed, "La mesa esta llena.");
+                }
+
+                await EnsureNotSeatedAsync(session, table.GameId, userId, ct);
+                var joinedAt = clock.GetUtcNow();
+                var entryBet = SitDownAt(table, free, userId, accountId, entry, Guid.NewGuid(), joinedAt);
+                table.LastActivityAt = joinedAt;
+                session.Store(table);
+                session.Insert(entryBet);
+                await using var entryOutbox = outbox.Enroll(session);
+                await entryOutbox.PublishAsync(new ReserveStake(entryBet.Id, accountId, entry, options.ReservationSeconds, table.GameId));
+                await BroadcastAsync(entryOutbox, table, joinedAt);
+                await session.SaveChangesAsync(ct);
+                return;
             }
 
             if (table.Seats.Count >= table.MaxPlayers)
@@ -189,7 +240,7 @@ public sealed partial class TableService(
         });
 
     /// <summary>Entra a una mesa privada con solo su codigo (la privada no se lista ni se revela: el codigo es la unica forma de encontrarla).</summary>
-    public async Task<Guid> JoinByCodeAsync(Guid userId, Guid accountId, string gameId, string code, CancellationToken ct = default)
+    public async Task<Guid> JoinByCodeAsync(Guid userId, Guid accountId, string gameId, string code, long? amount = null, CancellationToken ct = default)
     {
         GameOf(gameId);
         var clean = code?.Trim().ToUpperInvariant() ?? string.Empty;
@@ -199,9 +250,9 @@ public sealed partial class TableService(
         }
 
         await using var query = store.QuerySession();
-        var found = await query.Query<PlayerTable>().Where(t => t.GameId == gameId && t.IsPrivate && t.JoinCode == clean && t.Status == TableStatus.Open).FirstOrDefaultAsync(ct)
+        var found = await query.Query<PlayerTable>().Where(t => t.GameId == gameId && t.IsPrivate && t.JoinCode == clean && (t.Status == TableStatus.Open || (t.Status == TableStatus.Playing && t.Continuous))).FirstOrDefaultAsync(ct)
             ?? throw new GamesDomainException(GamesError.InvalidAction, "El codigo de la mesa no es correcto.");
-        await JoinAsync(userId, accountId, found.Id, clean, ct);
+        await JoinAsync(userId, accountId, found.Id, clean, amount, ct);
         return found.Id;
     }
 
@@ -214,6 +265,12 @@ public sealed partial class TableService(
             var seat = table.SeatOf(userId);
             if (seat < 0)
             {
+                return;
+            }
+
+            if (table.Continuous)
+            {
+                await LeaveContinuousAsync(session, table, seat, userId, ct);
                 return;
             }
 
@@ -345,6 +402,7 @@ public sealed partial class TableService(
             }
 
             var now = clock.GetUtcNow();
+            table.LastActivityAt = now;
             table.Seats[seat].Misses = 0;
             table.Seats[seat].Away = false;
             await AdvanceAsync(session, table, game, ApplyOrThrow(game, table.StateJson!, seat, action, now), now, ct);
@@ -369,14 +427,14 @@ public sealed partial class TableService(
         {
             var seat = table.Seats[i];
             var ready = seat.IsBot || (seat.BetId is { } betId && readyBets.Contains(betId));
-            seats.Add(new TableSeatView(i, seat.IsBot ? $"Bot {i + 1}" : $"Jugador {i + 1}", seat.IsBot, i == mySeat, ready, seat.Away, table.Payouts is { } p && i < p.Count ? p[i] : null));
+            seats.Add(new TableSeatView(i, seat.IsBot ? $"Bot {i + 1}" : seat.IsVacant() ? $"Asiento {i + 1}" : $"Jugador {i + 1}", seat.IsBot, i == mySeat, ready, seat.Away, table.Payouts is { } p && i < p.Count ? p[i] : null, seat.IsVacant()));
         }
 
         object? view = table.StateJson is null ? null : game.View(table.StateJson, mySeat >= 0 ? mySeat : null);
         var isOwner = table.OwnerUserId == userId;
         return new TableView(
             clock.GetUtcNow(), table.Id, table.GameId, table.Name, table.Status, table.BuyIn, game.MinPlayers, table.MaxPlayers, isOwner, table.IsPrivate,
-            isOwner ? table.JoinCode : null, table.Commitment, table.ServerSeed, seats, mySeat >= 0 ? mySeat : null, table.TurnSeat, table.TurnEndsAt, view, table.Payouts, table.ReservedPerSeat, table.Description);
+            isOwner ? table.JoinCode : null, table.Commitment, table.ServerSeed, seats, mySeat >= 0 ? mySeat : null, table.TurnSeat, table.TurnEndsAt, view, table.Payouts, table.ReservedPerSeat, table.Description, table.Continuous, table.MinEntry, table.MaxEntry);
     }
 
     /// <summary>Las mesas abiertas (publicas) del juego, mas las propias en curso.</summary>
@@ -384,7 +442,8 @@ public sealed partial class TableService(
     {
         GameOf(gameId);
         await using var session = store.QuerySession();
-        var open = await session.Query<PlayerTable>().Where(t => t.GameId == gameId && t.Status == TableStatus.Open && !t.IsPrivate).OrderByDescending(t => t.CreatedAt).Take(50).ToListAsync(ct);
+        var open = await session.Query<PlayerTable>().Where(t => t.GameId == gameId && !t.IsPrivate && (t.Status == TableStatus.Open || (t.Status == TableStatus.Playing && t.Continuous))).OrderByDescending(t => t.CreatedAt).Take(50).ToListAsync(ct);
+        open = [.. open.Where(t => !t.Continuous || t.Seats.Any(s => s.IsVacant()) || t.SeatOf(userId) >= 0)]; // una mesa libre llena no se ofrece
         var mine = await session.Query<PlayerTable>().Where(t => t.GameId == gameId && t.Humans.Contains(userId) && (t.Status == TableStatus.Open || t.Status == TableStatus.Playing)).ToListAsync(ct);
         return [.. open.Concat(mine.Where(m => open.All(o => o.Id != m.Id))).Select(t => Summary(t, userId))];
     }
@@ -414,11 +473,129 @@ public sealed partial class TableService(
         var playing = await query.Query<PlayerTable>().Where(t => t.Status == TableStatus.Playing).Select(t => new { t.Id, t.ReservationsRenewedAt, t.StartedAt }).ToListAsync(ct);
         var renew = playing.Where(t => (t.ReservationsRenewedAt ?? t.StartedAt ?? now) <= renewBefore).Select(t => t.Id).ToList();
 
+        // Las mesas libres sin actividad (esperando jugadores, o con todos ausentes) se cierran y se liquidan los asientos.
+        var idleBefore = now.AddMinutes(-options.CashIdleMinutes);
+        var idle = await query.Query<PlayerTable>().Where(t => t.Status == TableStatus.Playing && t.Continuous && t.LastActivityAt < idleBefore).Select(t => t.Id).ToListAsync(ct);
+
         await Task.WhenAll(
             due.Select(id => SafelyAsync(() => AutoPlayAsync(id, ct), id))
                 .Concat(stale.Select(id => SafelyAsync(() => CancelAsync(id, "OpenTableExpired", ct), id)))
-                .Concat(renew.Select(id => SafelyAsync(() => RenewReservationsAsync(id, ct), id))));
+                .Concat(renew.Select(id => SafelyAsync(() => RenewReservationsAsync(id, ct), id)))
+                .Concat(idle.Select(id => SafelyAsync(() => CloseIdleAsync(id, ct), id))));
     }
+
+    /// <summary>
+    /// Cierra una mesa libre inactiva: si esta esperando jugadores o todos los sentados estan ausentes, todos se levantan con lo que tienen (se liquidan sus reservas) y la mesa termina. Si hay una
+    /// mano en juego con alguien activo no se toca.
+    /// </summary>
+    public Task CloseIdleAsync(Guid tableId, CancellationToken ct = default) =>
+        RetryAsync(async () =>
+        {
+            await using var session = store.LightweightSession();
+            var table = await session.LoadAsync<PlayerTable>(tableId, ct);
+            var now = clock.GetUtcNow();
+            if (table is not { Status: TableStatus.Playing, Continuous: true, StateJson: not null } || table.LastActivityAt >= now.AddMinutes(-options.CashIdleMinutes))
+            {
+                return;
+            }
+
+            var game = GameOf(table.GameId);
+            var waiting = game.Turn(table.StateJson) is null;
+            var allAway = table.Seats.Where(s => s.UserId is not null).All(s => s.Away);
+            if (!waiting && !allAway)
+            {
+                return;
+            }
+
+            await AdvanceAsync(session, table, game, game.Shutdown(table.StateJson), now, ct);
+            await session.SaveChangesAsync(ct);
+        });
+
+    /// <summary>Un jugador de una mesa libre se levanta. Si su entrada todavia no llego se libera el asiento; si ya esta sentado, el juego decide: se va ya con su pila (entre manos) o al terminar la mano.</summary>
+    private async Task LeaveContinuousAsync(IDocumentSession session, PlayerTable table, int seat, Guid userId, CancellationToken ct)
+    {
+        var now = clock.GetUtcNow();
+        var bets = await session.Query<TableBet>().Where(b => b.TableId == table.Id && b.UserId == userId && b.Status == RoundStatus.Placed).ToListAsync(ct);
+        table.LastActivityAt = now;
+        if (!bets.Any(b => b.Reserved && b.Kind == TableBetKind.Entry))
+        {
+            // La Wallet todavia no confirmo las fichas: el asiento se libera y la reserva se devuelve cuando llegue (la mesa ya no tiene ese asiento).
+            table.Seats[seat] = new TableSeat();
+            table.SyncHumans();
+            await using var leaveOutbox = outbox.Enroll(session);
+            if (table.HumanCount == 0)
+            {
+                CloseContinuous(table, now);
+            }
+
+            session.Store(table);
+            await BroadcastAsync(leaveOutbox, table, now);
+            await session.SaveChangesAsync(ct);
+            return;
+        }
+
+        var game = GameOf(table.GameId);
+        table.Seats[seat].Misses = 0;
+        table.Seats[seat].Away = false;
+        await AdvanceAsync(session, table, game, ApplyOrThrow(game, table.StateJson!, seat, """{"type":"leave"}""", now), now, ct);
+        await session.SaveChangesAsync(ct);
+    }
+
+    /// <summary>
+    /// Recarga de una mesa libre: reserva las fichas en la Wallet y, cuando llegan, el juego las suma (a la pila de quien esta sentado en la mano siguiente, o ya mismo si se quedo sin fichas y estaba
+    /// decidiendo). Una recarga por vez; si el juego no la acepta (pila maxima), se devuelve lo reservado.
+    /// </summary>
+    public Task TopUpAsync(Guid userId, Guid accountId, Guid tableId, long amount, string idempotencyKey, CancellationToken ct = default) =>
+        RetryAsync(async () =>
+        {
+            if (string.IsNullOrWhiteSpace(idempotencyKey) || idempotencyKey.Length > 128)
+            {
+                throw new GamesDomainException(GamesError.InvalidIdempotencyKey, "La IdempotencyKey es obligatoria y de hasta 128 caracteres.");
+            }
+
+            await using var session = store.LightweightSession();
+            var table = await LoadAsync(session, tableId, ct);
+            var seat = table.SeatOf(userId);
+            if (seat < 0)
+            {
+                throw new GamesDomainException(GamesError.RoundNotFound, $"No existe la mesa {tableId}.");
+            }
+
+            if (!table.Continuous || table.Status != TableStatus.Playing)
+            {
+                throw new GamesDomainException(GamesError.TableClosed, "Solo se puede recargar en una mesa libre en juego.");
+            }
+
+            if (amount <= 0 || amount > table.MaxEntry)
+            {
+                throw new GamesDomainException(GamesError.InvalidBet, $"La recarga va de 1 a {table.MaxEntry} fichas.");
+            }
+
+            var betId = HashGuid($"tablebet:{tableId:N}:{userId:N}:topup:{idempotencyKey}");
+            if (await session.LoadAsync<TableBet>(betId, ct) is not null)
+            {
+                return; // reintento idempotente
+            }
+
+            var mine = await session.Query<TableBet>().Where(b => b.TableId == tableId && b.UserId == userId && b.Status == RoundStatus.Placed).ToListAsync(ct);
+            if (!mine.Any(b => b.Reserved && b.Kind == TableBetKind.Entry))
+            {
+                throw new GamesDomainException(GamesError.TableClosed, "Espera a que se confirmen tus fichas para recargar.");
+            }
+
+            if (mine.Any(b => !b.Reserved && b.Kind == TableBetKind.TopUp))
+            {
+                throw new GamesDomainException(GamesError.TableClosed, "Ya tenes una recarga en curso: espera a que se confirme.");
+            }
+
+            var now = clock.GetUtcNow();
+            table.LastActivityAt = now;
+            session.Store(table);
+            session.Insert(new TableBet { Id = betId, TableId = tableId, GameId = table.GameId, UserId = userId, AccountId = accountId, Stake = amount, Kind = TableBetKind.TopUp, Seat = seat, Status = RoundStatus.Placed, PlacedAt = now });
+            await using var outboxSession = outbox.Enroll(session);
+            await outboxSession.PublishAsync(new ReserveStake(betId, accountId, amount, options.ReservationSeconds, table.GameId));
+            await session.SaveChangesAsync(ct);
+        });
 
     /// <summary>Renueva la reserva de cada asiento humano de una partida en curso (<see cref="ExtendReservation"/>) y anota cuando.</summary>
     public Task RenewReservationsAsync(Guid tableId, CancellationToken ct = default) =>
@@ -461,7 +638,7 @@ public sealed partial class TableService(
             {
                 action = game.TimeoutAction(table.StateJson!, seatNo); // pausa del juego (entre manos): no es una falta de nadie
             }
-            else if (seat.IsBot || seat.Away)
+            else if (seat.IsBot || seat.Away || game.IsPassive(table.StateJson!, seatNo))
             {
                 action = game.BotAction(table.StateJson!, seatNo);
             }
@@ -521,6 +698,12 @@ public sealed partial class TableService(
         }
 
         var table = await session.LoadAsync<PlayerTable>(bet.TableId, ct);
+        if (table is { Continuous: true, IsFinal: false })
+        {
+            await OnContinuousReservedAsync(bet.Id, ct);
+            return;
+        }
+
         var stillSeated = table is { IsFinal: false } && table.Seats.Any(s => s.BetId == bet.Id);
         if (stillSeated)
         {
@@ -534,6 +717,71 @@ public sealed partial class TableService(
 
         await ResolveAsync(session, bet, b => b.Refund("LeftTable"), ct);
     }
+
+    /// <summary>
+    /// La Wallet reservo una entrada o una recarga de una mesa libre: el juego sienta al jugador o suma las fichas. Si el asiento ya no es suyo, o el juego no lo acepta (pila maxima, entrada fuera de rango),
+    /// se devuelve lo reservado.
+    /// </summary>
+    private Task OnContinuousReservedAsync(Guid betId, CancellationToken ct) =>
+        RetryAsync(async () =>
+        {
+            await using var session = store.LightweightSession();
+            var bet = await session.LoadAsync<TableBet>(betId, ct);
+            if (bet is null || bet.Status != RoundStatus.Placed || bet.Reserved)
+            {
+                return;
+            }
+
+            var table = await session.LoadAsync<PlayerTable>(bet.TableId, ct);
+            var now = clock.GetUtcNow();
+            var game = GameOf(bet.GameId);
+            var seatNo = bet.Seat ?? -1;
+            var valid = table is { IsFinal: false, StateJson: not null } && seatNo >= 0 && seatNo < table.Seats.Count && table.Seats[seatNo].UserId == bet.UserId
+                && (bet.Kind != TableBetKind.Entry || table.Seats[seatNo].BetId == bet.Id);
+            if (valid)
+            {
+                bet.MarkReserved();
+                session.Store(bet);
+                try
+                {
+                    var state = bet.Kind == TableBetKind.Entry ? game.SeatPlayer(table!.StateJson!, seatNo, bet.Stake, now) : game.AddChips(table!.StateJson!, seatNo, bet.Stake, now);
+                    table.LastActivityAt = now;
+                    await AdvanceAsync(session, table, game, state, now, ct);
+                    await session.SaveChangesAsync(ct);
+                    return;
+                }
+                catch (TableRuleException)
+                {
+                    // El juego no la acepta: se devuelve lo reservado (abajo).
+                }
+            }
+
+            await using var refundOutbox = outbox.Enroll(session);
+            if (bet.Reserved || bet.Status == RoundStatus.Placed)
+            {
+                if (bet.Refund("NotSeated"))
+                {
+                    session.Store(bet);
+                    await refundOutbox.PublishAsync(new RoundResolved(bet.Id, bet.AccountId, bet.Payout ?? 0));
+                }
+            }
+
+            // Una entrada que no se pudo sentar libera su asiento.
+            if (table is { IsFinal: false } && bet.Kind == TableBetKind.Entry && seatNo >= 0 && seatNo < table.Seats.Count && table.Seats[seatNo].BetId == bet.Id)
+            {
+                table.Seats[seatNo] = new TableSeat();
+                table.SyncHumans();
+                if (table.HumanCount == 0)
+                {
+                    CloseContinuous(table, now);
+                }
+
+                session.Store(table);
+                await BroadcastAsync(refundOutbox, table, now);
+            }
+
+            await session.SaveChangesAsync(ct);
+        });
 
     public Task OnStakeSettledAsync(StakeSettled message, CancellationToken ct = default) =>
         CloseAsync(message.BetId, (bet, now) => bet.MarkSettled(now), ct);
@@ -552,6 +800,28 @@ public sealed partial class TableService(
             }
 
             var table = await session.LoadAsync<PlayerTable>(bet.TableId, ct);
+            if (table is { Continuous: true, IsFinal: false })
+            {
+                // Saldo insuficiente en una mesa libre: una entrada libera su asiento; una recarga rechazada no cambia nada.
+                var seatNo = bet.Seat ?? -1;
+                if (bet.Kind == TableBetKind.Entry && seatNo >= 0 && seatNo < table.Seats.Count && table.Seats[seatNo].BetId == bet.Id)
+                {
+                    table.Seats[seatNo] = new TableSeat();
+                    table.SyncHumans();
+                    if (table.HumanCount == 0)
+                    {
+                        CloseContinuous(table, clock.GetUtcNow());
+                    }
+
+                    session.Store(table);
+                    await using var rejectedOutbox = outbox.Enroll(session);
+                    await BroadcastAsync(rejectedOutbox, table, clock.GetUtcNow());
+                    await session.SaveChangesAsync(ct);
+                }
+
+                return;
+            }
+
             if (table is not { Status: TableStatus.Open })
             {
                 return;
@@ -593,28 +863,55 @@ public sealed partial class TableService(
     /// <summary>Guarda el estado nuevo, decide el proximo turno (o termina y paga) y avisa a todos.</summary>
     private async Task AdvanceAsync(IDocumentSession session, PlayerTable table, ITableGame game, string state, DateTimeOffset now, CancellationToken ct)
     {
+        // Mesa continua: los que se levantaron se liquidan ahora (cada asiento por separado) y su lugar queda libre.
+        IReadOnlyList<CashOut> cashOuts = [];
+        if (table.Continuous)
+        {
+            (state, cashOuts) = game.DrainCashOuts(state);
+        }
+
         table.StateJson = state;
         var outcome = game.Outcome(state);
         await using var outboxSession = outbox.Enroll(session);
+        if (cashOuts.Count > 0)
+        {
+            await SettleCashOutsAsync(session, outboxSession, table, cashOuts, ct);
+        }
+
         if (outcome is null)
         {
-            var turn = game.Turn(state) ?? throw new InvalidOperationException($"El juego {table.GameId} no termino pero tampoco tiene turno.");
-            var seat = table.Seats[turn.Seat];
-            table.TurnSeat = turn.Seat;
-            if (turn.Automatic)
+            var turn = game.Turn(state);
+            if (turn is null)
             {
-                table.TurnEndsAt = now.AddSeconds(turn.Seconds);
-                table.NextAutoAt = table.TurnEndsAt;
-            }
-            else if (seat.IsBot || seat.Away)
-            {
+                if (!table.Continuous)
+                {
+                    throw new InvalidOperationException($"El juego {table.GameId} no termino pero tampoco tiene turno.");
+                }
+
+                // Mesa libre esperando jugadores: no hay turno ni nada que hacer solo.
+                table.TurnSeat = null;
                 table.TurnEndsAt = null;
-                table.NextAutoAt = now.AddMilliseconds(options.BotThinkMilliseconds);
+                table.NextAutoAt = null;
             }
             else
             {
-                table.TurnEndsAt = now.AddSeconds(turn.Seconds);
-                table.NextAutoAt = table.TurnEndsAt;
+                var seat = table.Seats[turn.Seat];
+                table.TurnSeat = turn.Seat;
+                if (turn.Automatic)
+                {
+                    table.TurnEndsAt = now.AddSeconds(turn.Seconds);
+                    table.NextAutoAt = table.TurnEndsAt;
+                }
+                else if (seat.IsBot || seat.Away || game.IsPassive(state, turn.Seat))
+                {
+                    table.TurnEndsAt = null;
+                    table.NextAutoAt = now.AddMilliseconds(options.BotThinkMilliseconds);
+                }
+                else
+                {
+                    table.TurnEndsAt = now.AddSeconds(turn.Seconds);
+                    table.NextAutoAt = table.TurnEndsAt;
+                }
             }
         }
         else
@@ -622,8 +919,56 @@ public sealed partial class TableService(
             await FinishAsync(session, outboxSession, table, outcome, now, ct);
         }
 
+        if (table is { Continuous: true, IsFinal: false } && table.HumanCount == 0)
+        {
+            CloseContinuous(table, now); // se fue el ultimo: la mesa libre termina
+        }
+
         session.Store(table);
         await BroadcastAsync(outboxSession, table, now);
+    }
+
+    /// <summary>
+    /// Liquida a quienes se levantaron de una mesa libre: lo que se llevan se paga contra su reserva de entrada (la primera) y las recargas, que ya estan en la pila, quedan en 0; despues el asiento queda libre.
+    /// Cada asiento se liquida solo, asi que quien gano sale con mas de lo que puso y quien perdio con menos, sin esperar al resto de la mesa.
+    /// </summary>
+    private async Task SettleCashOutsAsync(IDocumentSession session, IOutboxSession outboxSession, PlayerTable table, IReadOnlyList<CashOut> cashOuts, CancellationToken ct)
+    {
+        foreach (var cashOut in cashOuts)
+        {
+            if (table.Seats[cashOut.Seat].UserId is not { } userId)
+            {
+                continue;
+            }
+
+            var bets = (await session.Query<TableBet>().Where(b => b.TableId == table.Id && b.UserId == userId && b.Status == RoundStatus.Placed && b.Reserved).ToListAsync(ct)).OrderBy(b => b.PlacedAt).ToList();
+            var first = true;
+            foreach (var bet in bets)
+            {
+                var payout = first ? cashOut.Chips : 0;
+                first = false;
+                if (bet.Finish(payout))
+                {
+                    session.Store(bet);
+                    await outboxSession.PublishAsync(new RoundResolved(bet.Id, bet.AccountId, payout));
+                }
+            }
+
+            table.Seats[cashOut.Seat] = new TableSeat();
+        }
+
+        table.SyncHumans();
+    }
+
+    /// <summary>La ultima persona se fue de una mesa libre (o se cerro por inactividad): la mesa termina y se revela la semilla.</summary>
+    private void CloseContinuous(PlayerTable table, DateTimeOffset now)
+    {
+        table.Status = TableStatus.Finished;
+        table.FinishedAt = now;
+        table.ServerSeed = protector.Unprotect(table.EncryptedSeed, AadFor(table.Id));
+        table.TurnSeat = null;
+        table.TurnEndsAt = null;
+        table.NextAutoAt = null;
     }
 
     /// <summary>La partida termino: se revela la semilla y cada asiento humano cobra lo que se llevo.</summary>
@@ -670,7 +1015,14 @@ public sealed partial class TableService(
     }
 
     private static TableSummary Summary(PlayerTable table, Guid userId) =>
-        new(table.Id, table.GameId, table.Name, table.BuyIn, table.MaxPlayers, table.HumanCount, table.Seats.Count(s => s.IsBot), table.Status, table.SeatOf(userId) >= 0, table.IsPrivate, table.CreatedAt, table.ReservedPerSeat, table.Description);
+        new(table.Id, table.GameId, table.Name, table.BuyIn, table.MaxPlayers, table.HumanCount, table.Seats.Count(s => s.IsBot), table.Status, table.SeatOf(userId) >= 0, table.IsPrivate, table.CreatedAt, table.ReservedPerSeat, table.Description, table.Continuous, table.MinEntry, table.MaxEntry);
+
+    private static TableBet SitDownAt(PlayerTable table, int seatIndex, Guid userId, Guid accountId, long stake, Guid betId, DateTimeOffset now)
+    {
+        table.Seats[seatIndex] = new TableSeat { UserId = userId, AccountId = accountId, BetId = betId };
+        table.SyncHumans();
+        return new TableBet { Id = betId, TableId = table.Id, GameId = table.GameId, UserId = userId, AccountId = accountId, Stake = stake, Kind = TableBetKind.Entry, Seat = seatIndex, Status = RoundStatus.Placed, PlacedAt = now };
+    }
 
     private static TableBet SitDown(PlayerTable table, Guid userId, Guid accountId, DateTimeOffset now)
     {
