@@ -22,6 +22,7 @@ public abstract class TableGameModule(ITableGame game) : IGameModule
         ArgumentNullException.ThrowIfNull(services);
         ArgumentNullException.ThrowIfNull(configuration);
 
+        (game as IConfigurableGame)?.Configure(configuration);
         services.AddSingleton(game);
 
         // La plataforma de mesas es una sola para todos los juegos de mesas: se registra la primera vez.

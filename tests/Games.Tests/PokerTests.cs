@@ -407,7 +407,7 @@ public sealed class PokerTests
 
             var payouts = Game.Outcome(state)!.Payouts;
             Assert.Equal(200L * seats, payouts.Sum());
-            Assert.Equal(1, payouts.Count(p => p > 0)); // uno se lleva todo
+            Assert.Equal(seats <= 2 ? 1 : seats <= 4 ? 2 : 3, payouts.Count(p => p > 0)); // el premio se reparte entre los primeros
         }
     }
 
@@ -419,7 +419,11 @@ public sealed class PokerTests
         for (var steps = 0; steps < 600 && hands < 30; steps++)
         {
             var turn = Game.Turn(state);
-            Assert.NotNull(turn);
+            if (turn is null)
+            {
+                break; // las ciegas suben y se llevan las fichas de los ausentes: la partida puede terminar antes
+            }
+
             var action = Game.BotAction(state, turn.Seat); // lo que hace la plataforma por un asiento ausente
             Assert.DoesNotContain("raise", action);
             state = Game.Apply(state, turn.Seat, action, DateTimeOffset.UnixEpoch);
@@ -428,24 +432,25 @@ public sealed class PokerTests
             Assert.Equal(400L, s.Players.Sum(p => p.Stack) + (s.Done ? 0 : s.Pot));
         }
 
-        Assert.True(hands >= 30, "las manos siguen una tras otra");
+        Assert.True(hands >= 10 || Parse(state).Over, "las manos siguen una tras otra");
         Assert.Equal("""{"type":"fold"}""", Game.TimeoutAction(StartHand(3), Parse(StartHand(3)).Current)); // con algo por pagar, se retira
     }
 
     // ---- Varias manos ----
 
     /// <summary>Tres jugadores van all-in con 101; el tercero pierde todo (queda afuera) y la partida sigue de a dos.</summary>
-    private static string ThreeWayHandWithOneElimination()
+    private static string ThreeWayHandWithOneElimination(long buyIn = 101, int rebuys = 0)
     {
-        var probe = Parse(StartHand(3, buyIn: 101));
+        var probe = Parse(StartHand(3, buyIn: buyIn));
         var dealer = probe.Dealer;
         var hole = new int[3][];
         var order = new[] { (dealer + 1) % 3, (dealer + 2) % 3, dealer };
         hole[order[0]] = [C(Hearts, 14), C(Clubs, 13)];
         hole[order[1]] = [C(Diamonds, 14), C(Spades, 13)];
         hole[order[2]] = [C(Hearts, 3), C(Clubs, 4)];
-        var state = Crafted(3, hole, [C(Spades, 2), C(Hearts, 7), C(Diamonds, 9), C(Clubs, 11), C(Spades, 5)], buyIn: 101);
-        return ShoveUntilDone(state);
+        var crafted = Parse(Crafted(3, hole, [C(Spades, 2), C(Hearts, 7), C(Diamonds, 9), C(Clubs, 11), C(Spades, 5)], buyIn: buyIn));
+        crafted.Rebuys = rebuys;
+        return ShoveUntilDone(Serialize(crafted));
     }
 
     [Fact]
@@ -582,7 +587,7 @@ public sealed class PokerTests
 
         Assert.Equal([90L, 0L, 220L], done.Players.Select(p => p.Stack)); // los ases cobran el principal; el lateral y lo que nadie igualo son del largo
         Assert.False(done.Over);
-        Assert.True(done.Players[1].Stack == 0 && !done.Players[1].Out); // el mediano se quedo sin fichas: afuera desde la mano siguiente
+        Assert.True(done.Players[1].Stack == 0 && done.Players[1].Out); // el mediano se quedo sin fichas y no tiene recompras: afuera
     }
 
     [Fact]
@@ -601,7 +606,9 @@ public sealed class PokerTests
 
         Assert.Equal([0L, 0L, 310L], done.Players.Select(p => p.Stack));
         Assert.True(done.Over);
-        Assert.Equal([0L, 0L, 310L], Game.Outcome(Serialize(done))!.Payouts);
+        // El largo es primero; el mediano (arrancaba con 80) se fue despues del corto (30): segundo. Premio 65 % / 35 % de 3 x 100.
+        Assert.Equal([2, 1, 0], PokerGame.Ranking(done));
+        Assert.Equal([0L, 105L, 195L], Game.Outcome(Serialize(done))!.Payouts);
     }
 
     [Fact]
@@ -667,5 +674,244 @@ public sealed class PokerTests
     public void Poker_has_no_bots()
     {
         Assert.False(Game.AllowsBots);
+    }
+
+    // ---- Torneo: opciones, ciegas crecientes, recompras, premios y comision ----
+
+    private static JsonElement Opts(string json) => JsonDocument.Parse(json).RootElement;
+
+    private static string StartTournament(int seats, long buyIn, string options, string seed = "poker-test-seed")
+    {
+        var quote = Game.Quote(buyIn, seats, Opts(options));
+        return Game.Start(new GameStartContext(seats, seed, TableId, buyIn, DateTimeOffset.UnixEpoch, quote.OptionsJson));
+    }
+
+    [Fact]
+    public void Quoting_a_table_computes_what_is_reserved_and_validates_the_options()
+    {
+        var plain = Game.Quote(100, 3, null);
+        Assert.Equal(110, plain.Stake); // la entrada mas el 10 % de comision
+        Assert.Contains("\"bigBlind\":4", plain.OptionsJson);
+        Assert.Contains("sin recompras", plain.Description);
+
+        var withRebuys = Game.Quote(100, 3, Opts("""{"bigBlind":4,"rebuys":2}"""));
+        Assert.Equal(330, withRebuys.Stake); // tres entradas posibles de 100 + 10
+        Assert.Contains("2 recompras", withRebuys.Description);
+        Assert.Contains("330", withRebuys.Breakdown);
+
+        Assert.Equal("bad_blind", Assert.Throws<TableRuleException>(() => Game.Quote(100, 3, Opts("""{"bigBlind":3}"""))).Code); // impar
+        Assert.Equal("bad_blind", Assert.Throws<TableRuleException>(() => Game.Quote(100, 3, Opts("""{"bigBlind":1}"""))).Code);
+        Assert.Equal("bad_blind", Assert.Throws<TableRuleException>(() => Game.Quote(100, 3, Opts("""{"bigBlind":10}"""))).Code); // 10 ciegas grandes: menos de 20
+        Assert.Equal("bad_blind", Assert.Throws<TableRuleException>(() => Game.Quote(1_000, 3, Opts("""{"bigBlind":8}"""))).Code); // 125 ciegas grandes: mas de 100
+        Assert.Equal("bad_rebuys", Assert.Throws<TableRuleException>(() => Game.Quote(100, 3, Opts("""{"rebuys":3}"""))).Code);
+        Assert.Equal("bad_option", Assert.Throws<TableRuleException>(() => Game.Quote(100, 3, Opts("""{"bigBlind":"mucha"}"""))).Code);
+        Assert.Equal(2, Game.Options.Count);
+    }
+
+    [Fact]
+    public void The_blinds_rise_every_ten_hands_rounded_up_to_an_even_number()
+    {
+        Assert.Equal([4L, 4L, 6L, 6L, 10L, 16L, 24L], new[] { 1, 10, 11, 20, 21, 31, 41 }.Select(h => PokerGame.BigBlindAt(4, h, 10, 50)));
+
+        var state = StartTournament(3, 100, """{"bigBlind":4}""");
+        var level = (PokerView)Game.View(state, 0);
+        Assert.Equal((2L, 4L, 6L, 10), (level.SmallBlind, level.BigBlind, level.NextBigBlind, level.HandsToNextLevel));
+
+        // Jugando manos de seguido (nadie apuesta) las ciegas suben en la mano 11 y las pilas siguen sumando lo mismo.
+        for (var guard = 0; Parse(state).HandNo < 11 && guard < 500; guard++)
+        {
+            var turn = Game.Turn(state)!;
+            state = Game.Apply(state, turn.Seat, Game.TimeoutAction(state, turn.Seat), DateTimeOffset.UnixEpoch);
+        }
+
+        var tenth = Parse(state);
+        Assert.Equal(11, tenth.HandNo);
+        Assert.Equal((3L, 6L), (tenth.SmallBlind, tenth.BigBlind));
+        Assert.Equal(300L, tenth.Players.Sum(p => p.Stack + p.Total));
+    }
+
+    /// <summary>Tres jugadores con una recompra por cabeza: uno se queda sin fichas en la primera mano y queda esperando decidir.</summary>
+    private static string HandWithAPlayerWaitingToRebuy(int rebuys = 1)
+    {
+        var state = Parse(ThreeWayHandWithOneElimination(buyIn: 100, rebuys: rebuys));
+        return Serialize(state);
+    }
+
+    [Fact]
+    public void A_player_who_runs_out_of_chips_with_rebuys_left_waits_to_decide_instead_of_being_out()
+    {
+        var done = HandWithAPlayerWaitingToRebuy();
+        var s = Parse(done);
+        var waiting = Array.FindIndex([.. s.Players], p => p.AwaitingRebuy);
+
+        Assert.True(waiting >= 0);
+        Assert.False(s.Players[waiting].Out);
+        Assert.False(s.Over); // todavia puede volver
+        Assert.Equal(20d, Game.Turn(done)!.Seconds); // ventana larga para decidir
+        Assert.True(Game.MayAct(done, waiting)); // puede decidir aunque no sea su turno
+        var view = (PokerView)Game.View(done, waiting);
+        Assert.Equal(["decline", "rebuy"], view.Actions);
+        Assert.Equal(1, view.Players[waiting].RebuysLeft);
+        Assert.Empty(((PokerView)Game.View(done, (waiting + 1) % 3)).Actions);
+    }
+
+    [Fact]
+    public void Rebuying_gives_a_new_entry_of_chips_shortens_the_pause_and_the_hand_goes_on_with_them()
+    {
+        var done = HandWithAPlayerWaitingToRebuy();
+        var waiting = Array.FindIndex([.. Parse(done).Players], p => p.AwaitingRebuy);
+
+        var after = Parse(Game.Apply(done, waiting, """{"type":"rebuy"}""", DateTimeOffset.UnixEpoch));
+
+        Assert.Equal(100L, after.Players[waiting].Stack);
+        Assert.Equal(1, after.Players[waiting].RebuysUsed);
+        Assert.False(after.Players[waiting].AwaitingRebuy);
+        Assert.Equal(1, after.RebuyCount);
+        Assert.Equal(400L, after.PrizePool); // la recompra suma una entrada al premio (sin la comision)
+        Assert.Equal(3d, Game.Turn(Serialize(after))!.Seconds); // ya decidieron todos: la pausa se acorta
+        Assert.Contains(after.Events, e => e.Kind == "rebuy" && e.Seat == waiting);
+        Assert.Equal("cannot_rebuy", Assert.Throws<TableRuleException>(() => Game.Apply(Serialize(after), waiting, """{"type":"rebuy"}""", DateTimeOffset.UnixEpoch)).Code);
+
+        var turn = Game.Turn(Serialize(after))!;
+        var next = Parse(Game.Apply(Serialize(after), turn.Seat, Game.TimeoutAction(Serialize(after), turn.Seat), DateTimeOffset.UnixEpoch));
+        Assert.Equal(2, next.HandNo);
+        Assert.Equal(2, next.Players[waiting].Cards.Count); // vuelve a recibir cartas
+        Assert.False(next.Players[waiting].Out);
+    }
+
+    [Fact]
+    public void Declining_the_rebuy_eliminates_the_player_and_the_last_one_with_chips_ends_the_match_at_once()
+    {
+        // Dos jugadores, una recompra cada uno: el que pierde el all-in decide no recomprar.
+        var probe = Parse(StartHand(2));
+        var hole = new int[2][];
+        hole[probe.Current] = [C(Spades, 14), C(Hearts, 14)];
+        hole[1 - probe.Current] = [C(Spades, 13), C(Hearts, 13)];
+        var state = Parse(Crafted(2, hole, [C(Clubs, 2), C(Diamonds, 7), C(Clubs, 9), C(Diamonds, 3), C(Clubs, 4)]));
+        state.Rebuys = 1;
+        var done = Parse(ShoveUntilDone(Serialize(state)));
+        var loser = Array.FindIndex([.. done.Players], p => p.Stack == 0);
+        Assert.True(done.Players[loser].AwaitingRebuy);
+        Assert.False(done.Over);
+
+        var after = Parse(Game.Apply(Serialize(done), loser, """{"type":"decline"}""", DateTimeOffset.UnixEpoch));
+
+        Assert.True(after.Over); // nadie mas puede recomprar y queda uno solo con fichas
+        Assert.Equal([1 - loser, loser], PokerGame.Ranking(after));
+        // El premio (2 x 100) es todo del primero; el que no recompro recupera la recompra que habia reservado (100).
+        Assert.Equal([300L, 100L], (1 - loser) == 0 ? Game.Outcome(Serialize(after))!.Payouts : Game.Outcome(Serialize(after))!.Payouts.Reverse());
+    }
+
+    [Fact]
+    public void Letting_the_pause_run_out_without_deciding_eliminates_the_player()
+    {
+        var done = HandWithAPlayerWaitingToRebuy();
+        var s = Parse(done);
+        var waiting = Array.FindIndex([.. s.Players], p => p.AwaitingRebuy);
+        var turn = Game.Turn(done)!;
+
+        var next = Parse(Game.Apply(done, turn.Seat, Game.TimeoutAction(done, turn.Seat), DateTimeOffset.UnixEpoch)); // vence la pausa
+
+        Assert.True(next.Players[waiting].Out);
+        Assert.False(next.Players[waiting].AwaitingRebuy);
+        Assert.Equal([waiting], next.Eliminated);
+        Assert.Equal(2, next.HandNo);
+        Assert.Empty(next.Players[waiting].Cards);
+    }
+
+    [Fact]
+    public void Once_all_the_rebuys_are_used_a_player_without_chips_is_out_for_good()
+    {
+        var done = Parse(HandWithAPlayerWaitingToRebuy(rebuys: 1));
+        var waiting = Array.FindIndex([.. done.Players], p => p.AwaitingRebuy);
+        done.Players[waiting].RebuysUsed = 1; // ya uso la unica que tenia
+        done.Players[waiting].AwaitingRebuy = false;
+        done.Players[waiting].Out = true;
+
+        Assert.Equal("cannot_rebuy", Assert.Throws<TableRuleException>(() => Game.Apply(Serialize(done), waiting, """{"type":"rebuy"}""", DateTimeOffset.UnixEpoch)).Code);
+    }
+
+    [Fact]
+    public void Rebuying_is_not_possible_while_a_hand_is_running()
+    {
+        var state = StartHand(3);
+        Assert.Equal("hand_running", Assert.Throws<TableRuleException>(() => Do(state, "rebuy")).Code);
+        Assert.Equal("hand_running", Assert.Throws<TableRuleException>(() => Do(state, "decline")).Code);
+    }
+
+    [Fact]
+    public void The_prize_is_shared_among_the_first_places_depending_on_how_many_play()
+    {
+        Assert.Equal([300L], PokerGame.Prizes(300, 2));
+        Assert.Equal([195L, 105L], PokerGame.Prizes(300, 3));
+        Assert.Equal([260L, 140L], PokerGame.Prizes(400, 4));
+        Assert.Equal([150L, 90L, 60L], PokerGame.Prizes(300, 5));
+        Assert.Equal([300L, 180L, 120L], PokerGame.Prizes(600, 6));
+        Assert.Equal([66L, 35L], PokerGame.Prizes(101, 3)); // el resto del redondeo va al primero
+        Assert.All(new[] { 2, 3, 4, 5, 6 }, seats => Assert.Equal(777L, PokerGame.Prizes(777, seats).Sum()));
+    }
+
+    [Fact]
+    public void The_payouts_return_unused_rebuys_and_the_house_keeps_the_fees_so_everything_adds_up()
+    {
+        // Tres jugadores con entrada 100, comision 10 y hasta 2 recompras: se reservaron 3 x 330. El primero uso una recompra.
+        var state = new PokerState
+        {
+            Seats = 3, BuyIn = 100, Fee = 10, Rebuys = 2, RebuyCount = 1, Over = true, Done = true, Eliminated = [1, 2],
+            Players = [new PokerPlayer { Stack = 400, RebuysUsed = 1 }, new PokerPlayer { Out = true, Ranked = true }, new PokerPlayer { Out = true, Ranked = true }],
+        };
+
+        var outcome = Game.Outcome(Serialize(state))!;
+
+        // Premio: 4 entradas = 400 -> 260 y 140. Reintegros: lo que cada uno reservo y no uso (110 por recompra sin usar).
+        Assert.Equal([370L, 220L, 360L], outcome.Payouts); // 260 + 110 | 0 + 220 | 140 + 220
+        Assert.Equal(40L, outcome.HouseTake); // 4 entradas pagadas x 10
+        Assert.Equal(3 * 330L, outcome.Payouts.Sum() + outcome.HouseTake);
+    }
+
+    [Fact]
+    public void A_tournament_view_shows_the_prize_pool_the_prizes_and_the_final_ranking()
+    {
+        var state = StartTournament(3, 100, """{"bigBlind":4,"rebuys":1}""");
+        var view = (PokerView)Game.View(state, 0);
+        Assert.Equal((1, 100L, 10L, 300L), (view.Rebuys, view.Entry, view.Fee, view.PrizePool));
+        Assert.Equal([195L, 105L], view.Prizes);
+        Assert.Empty(view.Ranking); // todavia se esta jugando
+        Assert.Equal(1, view.Players[0].RebuysLeft);
+    }
+
+    [Fact]
+    public void A_full_tournament_with_rebuys_between_bots_always_closes_the_accounts()
+    {
+        for (var match = 0; match < 15; match++)
+        {
+            var seats = 2 + (match % 5);
+            var state = StartTournament(seats, 200, """{"bigBlind":4,"rebuys":2}""", seed: $"torneo-{match}");
+            var steps = 0;
+            while (Game.Turn(state) is { } turn)
+            {
+                Assert.True(++steps < 20_000, "el torneo no termina");
+                var s = Parse(state);
+                string action;
+                if (s.Done)
+                {
+                    // Los que se quedaron sin fichas recompran si pueden (asi se prueba el camino completo); despues pasa la pausa.
+                    var waiting = Array.FindIndex([.. s.Players], p => p.AwaitingRebuy);
+                    action = waiting >= 0 ? $$"""{"type":"rebuy"}""" : Game.TimeoutAction(state, turn.Seat);
+                    state = Game.Apply(state, waiting >= 0 ? waiting : turn.Seat, action, DateTimeOffset.UnixEpoch);
+                }
+                else
+                {
+                    state = Game.Apply(state, turn.Seat, PokerBot.Choose(s, turn.Seat), DateTimeOffset.UnixEpoch);
+                }
+            }
+
+            var outcome = Game.Outcome(state)!;
+            var final = Parse(state);
+            var reservedEach = (200L + 20L) * 3; // entrada + comision, x (1 + 2 recompras)
+            Assert.Equal(reservedEach * seats, outcome.Payouts.Sum() + outcome.HouseTake);
+            Assert.Equal((seats + final.RebuyCount) * 20L, outcome.HouseTake);
+            Assert.All(outcome.Payouts, p => Assert.True(p >= 0));
+        }
     }
 }

@@ -58,6 +58,15 @@ public sealed class PlayerTable
     /// <summary>Lo que pone cada asiento (en fichas enteras).</summary>
     public long BuyIn { get; set; }
 
+    /// <summary>Lo que se reserva en la Wallet por asiento: la entrada mas lo que el juego sume (comision, recompras posibles). 0 en las mesas viejas: ahi es la entrada.</summary>
+    public long Stake { get; set; }
+
+    /// <summary>Las opciones de la mesa, ya normalizadas, en el formato propio del juego. Null si el juego no tiene.</summary>
+    public string? OptionsJson { get; set; }
+
+    /// <summary>Un resumen corto de las opciones para el listado ("Ciegas 2/4 · 1 recompra"). Null si no hay.</summary>
+    public string? Description { get; set; }
+
     public int MaxPlayers { get; set; }
 
     public TableStatus Status { get; set; }
@@ -97,6 +106,9 @@ public sealed class PlayerTable
     public Guid Version { get; set; }
 
     public bool IsFinal => Status is TableStatus.Finished or TableStatus.Cancelled;
+
+    /// <summary>Lo que se reserva (y se devuelve si algo falla) por asiento.</summary>
+    public long ReservedPerSeat => Stake > 0 ? Stake : BuyIn;
 
     public int HumanCount => Seats.Count(s => !s.IsBot);
 
