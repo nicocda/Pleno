@@ -311,7 +311,8 @@ a { color: inherit; }
 .board__outside { display: grid; gap: 6px; }
 .board__row { display: grid; gap: 6px; }
 .board__row--3 { grid-template-columns: repeat(3, 1fr); }
-.board__row--6 { grid-template-columns: repeat(6, 1fr); }
+.board__row--2 { grid-template-columns: repeat(2, 1fr); }
+.board__row--4 { grid-template-columns: repeat(4, 1fr); }
 .outside { position: relative; display: grid; gap: 1px; justify-items: center; padding: 8px 4px; font: inherit; font-weight: 700; color: var(--text); background: var(--felt); border: 1px solid var(--gold); border-radius: 8px; cursor: pointer; }
 .outside small { font-weight: 500; font-size: 0.7rem; color: var(--gold-soft); }
 .outside--red { background: var(--red); color: #fff; }
