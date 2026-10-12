@@ -28,8 +28,11 @@ public sealed record TurnInfo(int Seat, double Seconds, bool Automatic = false);
 /// </summary>
 public sealed record GameOutcome(IReadOnlyList<long> Payouts, long HouseTake = 0);
 
-/// <summary>Una opcion con la que se crea una mesa de un juego (para que la pantalla arme el formulario). <c>Kind</c>: <c>number</c> (campo numerico) o <c>choice</c> (una de <c>Choices</c>).</summary>
-public sealed record TableOption(string Key, string Label, string Hint, string Kind, IReadOnlyList<long>? Choices = null, long? Min = null, long? Max = null, long? Default = null);
+/// <summary>
+/// Una opcion con la que se crea una mesa de un juego (para que la pantalla arme el formulario). <c>Kind</c>: <c>number</c> (campo numerico) o <c>choice</c> (una de <c>Choices</c>, con su texto en <c>Labels</c>).
+/// <c>VisibleWhen</c> ("clave=valor") la muestra solo si otra opcion tiene ese valor.
+/// </summary>
+public sealed record TableOption(string Key, string Label, string Hint, string Kind, IReadOnlyList<long>? Choices = null, long? Min = null, long? Max = null, long? Default = null, IReadOnlyList<string>? Labels = null, string? VisibleWhen = null);
 
 /// <summary>
 /// La cotizacion de una mesa antes de crearla: cuanto se reserva por asiento (entrada, comision, recompras posibles...), las opciones ya normalizadas, un resumen corto para el listado y el

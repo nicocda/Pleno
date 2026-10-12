@@ -395,7 +395,8 @@ export function useJoinTable(gameId: string) {
   const api = useApi();
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: ({ tableId, code }: { tableId: string; code?: string }) => api.post<void>(`/games/${gameId}/tables/${tableId}/join`, code ? { code } : undefined),
+    mutationFn: ({ tableId, code, amount }: { tableId: string; code?: string; amount?: number }) =>
+      api.post<void>(`/games/${gameId}/tables/${tableId}/join`, code || amount !== undefined ? { ...(code ? { code } : {}), ...(amount !== undefined ? { amount } : {}) } : undefined),
     onSettled: () => queryClient.invalidateQueries({ queryKey: queryKeys.tablesOf(gameId) }),
   });
 }
@@ -417,6 +418,16 @@ export function useLeaveTable(gameId: string) {
   return useMutation({
     mutationFn: (tableId: string) => api.post<void>(`/games/${gameId}/tables/${tableId}/leave`),
     onSettled: () => queryClient.invalidateQueries({ queryKey: queryKeys.tablesOf(gameId) }),
+  });
+}
+
+/** Mesa libre: sumar fichas a mi pila. Se reservan en la Wallet y entran a la pila al empezar la mano siguiente. La clave evita reservar dos veces si se reintenta. */
+export function useTopUp(gameId: string, tableId: string) {
+  const api = useApi();
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ amount, idempotencyKey }: { amount: number; idempotencyKey: string }) => api.post<void>(`/games/${gameId}/tables/${tableId}/topup`, { amount }, { "Idempotency-Key": idempotencyKey }),
+    onSettled: () => queryClient.invalidateQueries({ queryKey: queryKeys.table(gameId, tableId) }),
   });
 }
 

@@ -253,9 +253,9 @@ public sealed class PokerGame : ITableGame, IConfigurableGame
 
     public IReadOnlyList<TableOption> Options { get; } =
     [
-        new("mode", "Modalidad", "Torneo: entrada fija, ciegas que suben y premio para los primeros. Mesa libre: te sentás con las fichas que quieras (dentro de un rango), recargás y te levantás cuando quieras cobrando tu pila; la casa cobra un rake de los pozos.", "choice", Choices: [0, 1], Default: 0),
-        new("bigBlind", "Ciega grande", "La ciega chica es la mitad. La entrada tiene que valer entre 20 y 100 ciegas grandes y las ciegas suben solas cada 10 manos.", "number", Min: 2),
-        new("rebuys", "Recompras", "Cuántas veces puede volver a entrar quien se queda sin fichas (cuesta una entrada más su comisión). Lo que reservás de más se devuelve si no lo usás.", "choice", Choices: [0, 1, 2], Default: 0),
+        new("mode", "Modalidad", "Torneo: entrada fija, ciegas que suben y premio para los primeros. Mesa libre: te sentás con las fichas que quieras (dentro de un rango), recargás y te levantás cuando quieras cobrando tu pila; la casa cobra un rake de los pozos.", "choice", Choices: [0, 1], Default: 0, Labels: ["Torneo", "Mesa libre"]),
+        new("bigBlind", "Ciega grande", "La ciega chica es la mitad. La entrada tiene que valer entre 20 y 100 ciegas grandes. En un torneo las ciegas suben solas cada 10 manos; en la mesa libre quedan fijas.", "number", Min: 2),
+        new("rebuys", "Recompras", "Cuántas veces puede volver a entrar quien se queda sin fichas (cuesta una entrada más su comisión). Lo que reservás de más se devuelve si no lo usás.", "choice", Choices: [0, 1, 2], Default: 0, VisibleWhen: "mode=0"),
     ];
 
     /// <summary>Lo que se elige al crear la mesa, ya validado: las ciegas, las recompras y lo que fija la casa (comision, niveles), que queda guardado en la mesa.</summary>

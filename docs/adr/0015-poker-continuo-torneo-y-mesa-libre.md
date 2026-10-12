@@ -1,6 +1,6 @@
 # ADR 0015 - Poker continuo: torneo y mesa libre
 
-- **Estado:** en implementacion: fases 1 (base comun) y 2 (torneo) hechas; falta la fase 3 (mesa libre con rake)
+- **Estado:** aceptada: implementadas las tres fases (base comun, torneo y mesa libre con rake)
 - **Fecha:** 2026-10-12
 
 ## Contexto
@@ -49,6 +49,16 @@ El poker de una mano **deja de existir**. Quedan dos modalidades sobre la misma 
 - **Torneo: comision de inscripcion** sobre la entrada (propuesta: 10 %) y tambien en cada recompra.
 - Solo eso: sin cuota por mano ni bote especial. Se muestran en las reglas de la mesa y cada mano registra lo cobrado; el rake no afecta a las cartas. Se acredita a la casa en la Wallet
   (asientos de partida doble) y se ve en el backoffice.
+
+## Como quedo la mesa libre (implementacion)
+- **Nace en juego y arranca sola:** no hay "Empezar"; la mano empieza cuando hay dos con fichas y la mesa espera si faltan. Cada asiento se liquida **por separado** al levantarse (el pago va a la primera reserva del jugador;
+  las recargas, ya en la pila, quedan en 0), sin una cuenta intermedia de la mesa: lo que gana la casa es la diferencia entre lo reservado y lo pagado, que incluye el rake. El invariante de conservacion de fichas lo verifica
+  una simulacion con entradas, recargas y salidas.
+- **La recarga entra a la pila al empezar la mano siguiente** (la pila no cambia en plena mano ni se toca un pozo en juego). Quien se queda sin fichas puede recargar de inmediato durante la ventana; si no, se va.
+- **Levantarse en plena mano:** el asiento sigue en automatico (pasa o se retira) y cobra al terminar la mano; entre manos cobra ya. Esto evita abandonar una mano con plata puesta y mantiene intactos los pozos.
+- **Rake:** porcentaje de cada pozo que llega al flop, sin tope, hacia abajo y por pozo; las apuestas no igualadas no pagan. El porcentaje (`Poker:RakePermille`) lo fija la casa y queda guardado en la mesa.
+- **Mesa inactiva:** una mesa esperando jugadores (o con todos ausentes) mas de `Tables:CashIdleMinutes` se cierra sola y se les devuelve su pila; con el motor vivo, la renovacion de reservas ([ADR 0016](0016-renovacion-de-reservas.md))
+  mantiene las fichas reservadas mientras haya partida.
 
 ## Consecuencias
 - Mas piezas que el resto de juegos de mesa: pozos laterales, bucle de manos, semilla por mano, rake y (para la mesa libre) liquidacion por asiento. Por eso se hace **por fases**, cada una
