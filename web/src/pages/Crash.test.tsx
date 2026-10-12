@@ -231,7 +231,7 @@ describe("Crash", () => {
     act(() => hub.emit("gameEvent", { game: "crash", kind: "roundCrashed", data: {}, at: new Date().toISOString() }));
 
     expect(await screen.findByRole("dialog", { name: "¡Ganaste!" })).toBeInTheDocument();
-    expect(screen.getByRole("dialog")).toHaveTextContent("150 fichas"); // ganancia neta: 250 - 100
+    expect(screen.getByRole("dialog")).toHaveTextContent("250 fichas"); // lo cobrado, no la ganancia neta
   });
 
   it("does not celebrate a win that was already settled when the page opened", async () => {

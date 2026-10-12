@@ -360,9 +360,9 @@ function Machine({ paytable }: { paytable: Paytable }) {
             </div>
             <h2 id="win-title" className="win-modal__title">{WIN_TITLES[winTier(winPopup.multiplier)]}</h2>
             {(winPopup.steps?.length ?? 0) > 1 && <p className="win-modal__chain">⚡ {winPopup.steps!.length - 1} {winPopup.steps!.length === 2 ? "cascada" : "cascadas"} encadenadas</p>}
-            <p className="sr-only">{formatChips((winPopup.payout ?? 0) - winPopup.stake)} fichas</p>
-            <p className="win-modal__amount" aria-hidden="true"><CountUp to={(winPopup.payout ?? 0) - winPopup.stake} /> <span>fichas</span></p>
-            <p className="muted">Apostaste {formatChips(winPopup.stake)} y cobraste {formatChips(winPopup.payout ?? 0)} (x{winPopup.multiplier}).</p>
+            <p className="sr-only">{formatChips(winPopup.payout ?? 0)} fichas</p>
+            <p className="win-modal__amount" aria-hidden="true"><CountUp to={winPopup.payout ?? 0} /> <span>fichas</span></p>
+            <p className="muted">Apostaste {formatChips(winPopup.stake)} (x{winPopup.multiplier}).</p>
             <button type="button" className="btn btn--gold" autoFocus onClick={() => setWinPopup(null)}>
               Continuar
             </button>
