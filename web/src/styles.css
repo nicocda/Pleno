@@ -301,6 +301,8 @@ a { color: inherit; }
 .cell--red { background: var(--red); }
 .cell--black { background: var(--black); }
 .cell--green { background: var(--green); }
+/* Toque largo para sacar fichas: sin menu ni seleccion del sistema ni zoom por doble toque. */
+.cell, .outside, .hotspot { -webkit-touch-callout: none; user-select: none; touch-action: manipulation; }
 .cell:hover:not(:disabled) { outline: 2px solid var(--gold-soft); }
 .cell--on { outline: 3px solid var(--gold); z-index: 2; }
 .cell--winner { box-shadow: 0 0 0 3px var(--win), 0 0 16px var(--win); z-index: 2; }

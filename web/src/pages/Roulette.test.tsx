@@ -1,4 +1,4 @@
-import { act, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { ApiError } from "../api/client";
 import type { PlacedBet } from "../api/types";
@@ -118,6 +118,31 @@ describe("Roulette table", () => {
     expect(screen.getByRole("button", { name: "Apostar 20 fichas" })).toBeInTheDocument();
     expect(within(screen.getByRole("list", { name: "Tus apuestas" })).getAllByRole("listitem")).toHaveLength(1);
     expect(screen.getByRole("list", { name: "Tus apuestas" })).toHaveTextContent("cobrás 720"); // 20 x 36
+  });
+
+  it("removes a chip with a long press on the board, without adding one on release", async () => {
+    renderApp(<Roulette />, { api: apiWith() });
+    await bet("Pleno 7");
+    await userEvent.click(spot("Pleno 7"));
+    expect(screen.getByRole("button", { name: "Apostar 20 fichas" })).toBeInTheDocument();
+
+    fireEvent.pointerDown(spot("Pleno 7"), { pointerType: "touch" });
+    await waitFor(() => expect(screen.getByRole("button", { name: "Apostar 10 fichas" })).toBeInTheDocument());
+    fireEvent.pointerUp(spot("Pleno 7"), { pointerType: "touch" });
+    fireEvent.click(spot("Pleno 7"));
+
+    expect(screen.getByRole("button", { name: "Apostar 10 fichas" })).toBeInTheDocument(); // el clic que sigue al toque largo no suma
+  });
+
+  it("does not remove a chip when the touch is released before the long press", async () => {
+    renderApp(<Roulette />, { api: apiWith() });
+    await bet("Pleno 7");
+
+    fireEvent.pointerDown(spot("Pleno 7"), { pointerType: "touch" });
+    fireEvent.pointerUp(spot("Pleno 7"), { pointerType: "touch" });
+    await new Promise((r) => setTimeout(r, 500));
+
+    expect(screen.getByRole("button", { name: "Apostar 10 fichas" })).toBeInTheDocument();
   });
 
   it("undoes the last chip and clears everything", async () => {
