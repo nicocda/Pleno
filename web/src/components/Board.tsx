@@ -1,7 +1,10 @@
-import { useMemo } from "react";
+import { useMemo, useRef } from "react";
 import { cellOf, chipBreakdown, COLUMNS, edgeSpots, outsideSpots, ROWS, type PlacedChips, type Spot } from "../lib/board";
 import { formatChips } from "../lib/format";
 import { pocketColor } from "../lib/roulette";
+
+/** Cuanto hay que mantener el dedo sobre un lugar para sacar una ficha (en pantallas tactiles no hay clic derecho). */
+const LONG_PRESS_MS = 400;
 
 interface Props {
   /** Lo apostado hasta ahora: se puede apostar a varios lugares a la vez. */
@@ -23,13 +26,44 @@ export function Board({ placed, disabled, winning, onPick, onRemove }: Props) {
   const dozens = outside.filter((s) => s.kind === "dozen");
   const columns = outside.filter((s) => s.kind === "column");
   const chances = outside.filter((s) => s.kind === "outside");
+  const halves = chances.filter((s) => s.betType === "Low" || s.betType === "High");
+  const evens = chances.filter((s) => s.betType !== "Low" && s.betType !== "High");
   const stakes = useMemo(() => new Map(placed.map((p) => [p.spot.id, p.stake])), [placed]);
   const isPlaced = (s: Spot) => stakes.has(s.id);
-  const remove = (spot: Spot) => (e: React.MouseEvent) => {
-    if (!onRemove) return;
-    e.preventDefault();
-    onRemove(spot);
+  const pressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const longPressed = useRef(false);
+  const cancelPress = () => {
+    if (pressTimer.current) clearTimeout(pressTimer.current);
+    pressTimer.current = null;
   };
+  /** Sacar una ficha de un lugar: clic derecho con mouse, toque largo con el dedo. */
+  const remove = (spot: Spot) => ({
+    onContextMenu: (e: React.MouseEvent) => {
+      if (!onRemove) return;
+      e.preventDefault();
+      // En Android el toque largo tambien dispara el menu contextual: ya se saco con el temporizador.
+      if (!longPressed.current) onRemove(spot);
+    },
+    onPointerDown: (e: React.PointerEvent) => {
+      longPressed.current = false;
+      if (!onRemove || e.pointerType === "mouse") return;
+      cancelPress();
+      pressTimer.current = setTimeout(() => {
+        longPressed.current = true;
+        navigator.vibrate?.(15);
+        onRemove(spot);
+      }, LONG_PRESS_MS);
+    },
+    onPointerUp: cancelPress,
+    onPointerLeave: cancelPress,
+    onPointerCancel: cancelPress,
+    // Tras un toque largo el clic que sigue no debe sumar una ficha.
+    onClickCapture: (e: React.MouseEvent) => {
+      if (!longPressed.current) return;
+      longPressed.current = false;
+      e.stopPropagation();
+    },
+  });
 
   const numberButton = (n: number, style: React.CSSProperties) => {
     const id = `Straight:${n}`;
@@ -46,7 +80,7 @@ export function Board({ placed, disabled, winning, onPick, onRemove }: Props) {
         className={`cell cell--${pocketColor(n)} ${on ? "cell--on" : ""} ${winning === n ? "cell--winner" : ""}`}
         style={style}
         onClick={() => onPick(spot)}
-        onContextMenu={remove(spot)}
+        {...remove(spot)}
       >
         {n}
         {stake !== undefined && <Stack stake={stake} />}
@@ -63,6 +97,11 @@ export function Board({ placed, disabled, winning, onPick, onRemove }: Props) {
           return numberButton(n, { gridColumn: column + 2, gridRow: row + 1 });
         })}
 
+        {columns.map((s) => (
+          // Columna 1 = fila de abajo (1, 4, 7...), columna 3 = fila de arriba.
+          <OutsideButton key={s.id} spot={s} text="2 a 1" compact style={{ gridColumn: COLUMNS + 2, gridRow: ROWS + 1 - s.selection[0]! }} on={isPlaced(s)} disabled={disabled} stake={stakes.get(s.id)} onPick={onPick} onRemove={remove} />
+        ))}
+
         {edges.map((s) => (
           <button
             key={s.id}
@@ -71,9 +110,9 @@ export function Board({ placed, disabled, winning, onPick, onRemove }: Props) {
             aria-pressed={isPlaced(s)}
             disabled={disabled}
             className={`hotspot hotspot--${s.kind} ${isPlaced(s) ? "hotspot--on" : ""}`}
-            style={{ left: `${((s.x! + 1) / (COLUMNS + 1)) * 100}%`, top: `${(s.y! / ROWS) * 100}%` }}
+            style={{ left: `${((s.x! + 1) / (COLUMNS + 2)) * 100}%`, top: `${(s.y! / ROWS) * 100}%` }}
             onClick={() => onPick(s)}
-            onContextMenu={remove(s)}
+            {...remove(s)}
           >
             {isPlaced(s) && <Stack stake={stakes.get(s.id)!} />}
           </button>
@@ -86,13 +125,13 @@ export function Board({ placed, disabled, winning, onPick, onRemove }: Props) {
             <OutsideButton key={s.id} spot={s} text={`${s.selection[0]}ª docena`} on={isPlaced(s)} disabled={disabled} stake={stakes.get(s.id)} onPick={onPick} onRemove={remove} />
           ))}
         </div>
-        <div className="board__row board__row--3">
-          {columns.map((s) => (
-            <OutsideButton key={s.id} spot={s} text={`Columna ${s.selection[0]}`} on={isPlaced(s)} disabled={disabled} stake={stakes.get(s.id)} onPick={onPick} onRemove={remove} />
+        <div className="board__row board__row--2">
+          {halves.map((s) => (
+            <OutsideButton key={s.id} spot={s} text={OUTSIDE_NAMES[s.betType]!} on={isPlaced(s)} disabled={disabled} stake={stakes.get(s.id)} onPick={onPick} onRemove={remove} tone={s.betType === "Red" ? "red" : s.betType === "Black" ? "black" : undefined} />
           ))}
         </div>
-        <div className="board__row board__row--6">
-          {chances.map((s) => (
+        <div className="board__row board__row--4">
+          {evens.map((s) => (
             <OutsideButton key={s.id} spot={s} text={OUTSIDE_NAMES[s.betType]!} on={isPlaced(s)} disabled={disabled} stake={stakes.get(s.id)} onPick={onPick} onRemove={remove} tone={s.betType === "Red" ? "red" : s.betType === "Black" ? "black" : undefined} />
           ))}
         </div>
@@ -101,11 +140,11 @@ export function Board({ placed, disabled, winning, onPick, onRemove }: Props) {
   );
 }
 
-function OutsideButton({ spot, text, on, disabled, stake, onPick, onRemove, tone }: { spot: Spot; text: string; on: boolean; disabled: boolean; stake?: number; onPick: (s: Spot) => void; onRemove: (s: Spot) => (e: React.MouseEvent) => void; tone?: "red" | "black" }) {
+function OutsideButton({ spot, text, on, disabled, stake, onPick, onRemove, tone, compact, style }: { spot: Spot; text: string; compact?: boolean; style?: React.CSSProperties; on: boolean; disabled: boolean; stake?: number; onPick: (s: Spot) => void; onRemove: (s: Spot) => React.HTMLAttributes<HTMLButtonElement>; tone?: "red" | "black" }) {
   return (
-    <button type="button" aria-label={spot.label} aria-pressed={on} disabled={disabled} className={`outside ${tone ? `outside--${tone}` : ""} ${on ? "outside--on" : ""}`} onClick={() => onPick(spot)} onContextMenu={onRemove(spot)}>
+    <button type="button" aria-label={spot.label} aria-pressed={on} disabled={disabled} className={`outside ${compact ? "outside--col" : ""} ${tone ? `outside--${tone}` : ""} ${on ? "outside--on" : ""}`} style={style} onClick={() => onPick(spot)} {...onRemove(spot)}>
       {text}
-      <small>x{spot.multiplier}</small>
+      {!compact && <small>x{spot.multiplier}</small>}
       {on && stake !== undefined && <Stack stake={stake} />}
     </button>
   );

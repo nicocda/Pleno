@@ -219,8 +219,8 @@ describe("Truco", () => {
     act(() => hub.emit("gameEvent", { game: "truco", kind: "tableChanged", data: JSON.stringify({ tableId: TABLE_ID, gameId: "truco", status: "Finished" }), at: iso(0) }));
 
     const dialog = await screen.findByRole("dialog", { name: "¡Ganaste!" });
-    expect(dialog).toHaveTextContent("+10 fichas");
-    expect(dialog).toHaveTextContent("Pusiste 10 y cobraste 20");
+    expect(dialog).toHaveTextContent("20 fichas");
+    expect(dialog).toHaveTextContent("Pusiste 10");
     await userEvent.click(within(dialog).getByRole("button", { name: "Continuar" }));
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
     expect(screen.getByTestId("tru-result")).toHaveTextContent("¡Ganaste! +10 fichas");

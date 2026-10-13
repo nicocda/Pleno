@@ -1,15 +1,14 @@
 import { expect, test, type Page } from "@playwright/test";
 
-// Usuario de desarrollo del realm. SOLO desarrollo local. Necesita el sistema levantado (aspire start).
+// Usuario de desarrollo del servicio de identidad. SOLO desarrollo local. Necesita el sistema levantado (aspire start).
 const USER = process.env.E2E_USER ?? "jugador2";
 const PASSWORD = process.env.E2E_PASSWORD ?? "jugador2-dev";
 
 async function login(page: Page) {
   await page.goto("/");
-  await page.getByRole("button", { name: /Entrar o crear cuenta/ }).click();
-  await page.locator("#username").fill(USER);
-  await page.locator("#password").fill(PASSWORD);
-  await page.locator("#kc-login").click();
+  await page.getByLabel("Alias o email").fill(USER);
+  await page.getByLabel("Contraseña").fill(PASSWORD);
+  await page.getByRole("button", { name: "Entrar", exact: true }).click();
   await expect(page.getByRole("heading", { name: new RegExp(`Hola, ${USER}`) })).toBeVisible();
 }
 

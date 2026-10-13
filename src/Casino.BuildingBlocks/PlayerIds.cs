@@ -43,6 +43,14 @@ public static class PrincipalExtensions
         return Guid.TryParse(sub, out userId);
     }
 
+    /// <summary>Roles del usuario: los que trae el token en el claim plano "role" (los emite el servicio de identidad).</summary>
+    public static IEnumerable<string> GetRoles(this ClaimsPrincipal principal)
+    {
+        ArgumentNullException.ThrowIfNull(principal);
+
+        return principal.FindAll("role").Select(claim => claim.Value);
+    }
+
     public static Guid GetUserId(this ClaimsPrincipal principal) =>
         principal.TryGetUserId(out var userId)
             ? userId

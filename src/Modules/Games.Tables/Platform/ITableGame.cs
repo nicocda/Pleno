@@ -13,13 +13,41 @@ public sealed class TableRuleException(string code, string message) : Exception(
 /// <param name="Seed">La semilla de la partida (provably fair): el mazo sale de ella.</param>
 /// <param name="TableId">Id de la mesa (se usa para separar los flujos de numeros de cada partida).</param>
 /// <param name="BuyIn">Lo que puso cada asiento.</param>
-public sealed record GameStartContext(int Seats, string Seed, Guid TableId, long BuyIn, DateTimeOffset Now);
+/// <param name="Options">Las opciones de la mesa ya normalizadas por <see cref="ITableGame.Quote"/> (JSON propio del juego), o null si el juego no tiene.</param>
+public sealed record GameStartContext(int Seats, string Seed, Guid TableId, long BuyIn, DateTimeOffset Now, string? Options = null);
 
-/// <summary>A quien le toca y cuanto tiene para decidir.</summary>
-public sealed record TurnInfo(int Seat, double Seconds);
+/// <summary>
+/// A quien le toca y cuanto tiene para decidir. <paramref name="Automatic"/> marca una pausa del propio juego (por ejemplo entre dos manos de poker): cuando vence, el motor juega
+/// <see cref="ITableGame.TimeoutAction"/> sin contarle una falta al asiento ni dejar que "juegue un bot".
+/// </summary>
+public sealed record TurnInfo(int Seat, double Seconds, bool Automatic = false);
 
-/// <summary>El resultado final: lo que se lleva cada asiento (en fichas enteras). La suma tiene que ser igual a lo que se puso entre todos.</summary>
-public sealed record GameOutcome(IReadOnlyList<long> Payouts);
+/// <summary>
+/// El resultado final: lo que se lleva cada asiento (en fichas enteras). Los pagos mas lo que se queda la casa (<paramref name="HouseTake"/>, por ejemplo la comision de un torneo)
+/// tienen que ser iguales a lo que se reservo entre todos: la plataforma lo verifica antes de pagar.
+/// </summary>
+public sealed record GameOutcome(IReadOnlyList<long> Payouts, long HouseTake = 0);
+
+/// <summary>
+/// Una opcion con la que se crea una mesa de un juego (para que la pantalla arme el formulario). <c>Kind</c>: <c>number</c> (campo numerico) o <c>choice</c> (una de <c>Choices</c>, con su texto en <c>Labels</c>).
+/// <c>VisibleWhen</c> ("clave=valor") la muestra solo si otra opcion tiene ese valor.
+/// </summary>
+public sealed record TableOption(string Key, string Label, string Hint, string Kind, IReadOnlyList<long>? Choices = null, long? Min = null, long? Max = null, long? Default = null, IReadOnlyList<string>? Labels = null, string? VisibleWhen = null);
+
+/// <summary>
+/// La cotizacion de una mesa antes de crearla: cuanto se reserva por asiento (entrada, comision, recompras posibles...), las opciones ya normalizadas, un resumen corto para el listado y el
+/// desglose para mostrarle al jugador. Si lo que se pidio no es valido el juego lanza <see cref="TableRuleException"/> con el motivo.
+/// </summary>
+public sealed record TableQuote(long Stake, string? OptionsJson, string? Description, string? Breakdown, bool Continuous = false, long MinEntry = 0, long MaxEntry = 0);
+
+/// <summary>Lo que un asiento se lleva de una mesa continua al levantarse (o al cerrarse la mesa): su pila, en fichas enteras (puede ser 0). La plataforma lo liquida contra las reservas de ese asiento.</summary>
+public sealed record CashOut(int Seat, long Chips);
+
+/// <summary>Un juego que lee su propia configuracion (seccion del appsettings) al registrarse: por ejemplo la comision de la casa.</summary>
+public interface IConfigurableGame
+{
+    void Configure(Microsoft.Extensions.Configuration.IConfiguration configuration);
+}
 
 /// <summary>
 /// El contrato de un juego de mesas ENTRE JUGADORES (Uno, Truco, Poker...). Es una maquina de estados PURA: sin base de datos, sin reloj propio, sin saber de la Wallet
@@ -37,6 +65,38 @@ public interface ITableGame
     long MinBuyIn { get; }
 
     long MaxBuyIn { get; }
+
+    /// <summary>Si el dueño puede sumar bots a la mesa. Un juego donde la casa no quiere poner fichas (poker) lo apaga: quien se ausenta no apuesta, pasa o se retira.</summary>
+    bool AllowsBots => true;
+
+    /// <summary>Las opciones de creacion propias del juego (ciegas, recompras...). Vacio si no tiene.</summary>
+    IReadOnlyList<TableOption> Options => [];
+
+    /// <summary>
+    /// Valida la mesa que se quiere crear y la cotiza (cuanto se reserva por asiento y las opciones normalizadas). Por defecto la entrada es lo unico que se reserva. Lanza
+    /// <see cref="TableRuleException"/> si algo no es valido.
+    /// </summary>
+    TableQuote Quote(long buyIn, int maxPlayers, System.Text.Json.JsonElement? options) => new(buyIn, null, null, null);
+
+    // ---- Mesas continuas (la mesa libre del Poker): no terminan; se entra, se recarga y se sale cuando se quiere ----
+
+    /// <summary>Se sienta a alguien con <paramref name="chips"/> en un asiento libre (sus fichas ya estan reservadas). Si con eso hay quien juegue, arranca la mano. Lanza <see cref="TableRuleException"/> si no se puede.</summary>
+    string SeatPlayer(string state, int seat, long chips, DateTimeOffset now) => throw new NotSupportedException("Este juego no tiene mesas continuas.");
+
+    /// <summary>Suma fichas ya reservadas a quien esta sentado (una recarga). Lanza <see cref="TableRuleException"/> si no se puede (pila maxima, asiento vacio...): la plataforma devuelve entonces lo reservado.</summary>
+    string AddChips(string state, int seat, long chips, DateTimeOffset now) => throw new NotSupportedException("Este juego no tiene mesas continuas.");
+
+    /// <summary>Saca del estado a quienes se levantaron y devuelve lo que se llevan, para que la plataforma los liquide y libere el asiento.</summary>
+    (string State, IReadOnlyList<CashOut> CashOuts) DrainCashOuts(string state) => (state, []);
+
+    /// <summary>Cierra la mesa: todos los sentados se levantan con lo que tienen (y lo que pusieron en la mano en curso vuelve a su dueño).</summary>
+    string Shutdown(string state) => state;
+
+    /// <summary>Si ese asiento juega "en automatico" (se esta levantando): el motor juega por el enseguida en vez de esperar su turno.</summary>
+    bool IsPassive(string state, int seat) => false;
+
+    /// <summary>Si ese asiento puede jugar ahora. Por defecto, solo el del turno; un juego puede dejar jugar fuera de turno (por ejemplo, recomprar entre manos).</summary>
+    bool MayAct(string state, int seat) => Turn(state) is { } turn && turn.Seat == seat;
 
     /// <summary>Arma la partida (reparte, baraja con la semilla...) y devuelve el estado inicial.</summary>
     string Start(GameStartContext context);

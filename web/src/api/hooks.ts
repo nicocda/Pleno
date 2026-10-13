@@ -1,7 +1,7 @@
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useApi } from "./ApiProvider";
+import { useApi, useIdentityApi } from "./ApiProvider";
 import { ApiError } from "./client";
-import type { Account, Withdrawal, LoadChipsResult, CashierMe, CashierTransfer, HierarchyLevel, HierarchyNode, JurisdictionMember, CreateTableBody, TableCreated, TableRules, TableState, TableSummary, BlackjackBet, BlackjackTable, BlackjackTableState, CrashBet, CrashCashOut, CrashState, GameInfo, SlotsSettings, SlotsSettingsBody, SlotsSettingsHistoryItem, SlotsSettingsPreview, CreditFilter, CreditHistory, MovementsPage, AuditEntry, CreditResult, FairnessInfo, Me, Paytable, PlaceBetBody, PlacedBet, Round, Spin, UserSummary } from "./types";
+import type { Account, Withdrawal, LoadChipsResult, CashierMe, CashierTransfer, HierarchyLevel, HierarchyNode, JurisdictionMember, CreateTableBody, TableCreated, TableQuoteResult, TableRules, TableState, TableSummary, BlackjackBet, BlackjackTable, BlackjackTableState, CrashBet, CrashCashOut, CrashState, GameInfo, SlotsSettings, SlotsSettingsBody, SlotsSettingsHistoryItem, SlotsSettingsPreview, CreditFilter, CreditHistory, MovementsPage, AuditEntry, CreditResult, FairnessInfo, Me, Paytable, PlaceBetBody, PlacedBet, IdentityUser, Round, Spin, UserSummary } from "./types";
 
 export const queryKeys = {
   spinsAll: ["spins"] as const,
@@ -13,6 +13,8 @@ export const queryKeys = {
   roundsAll: ["rounds"] as const,
   fairness: ["fairness"] as const,
   adminUsers: ["admin", "users"] as const,
+  identityUsers: (query: string) => ["admin", "identity-users", query] as const,
+  identityUsersAll: ["admin", "identity-users"] as const,
   adminAudit: ["admin", "audit"] as const,
   adminCredits: (filter: CreditFilter) => ["admin", "credits", filter] as const,
   adminCreditsAll: ["admin", "credits"] as const,
@@ -111,6 +113,26 @@ export function useRound(betId: string | null) {
 export function useAdminUsers(enabled: boolean) {
   const api = useApi();
   return useQuery({ queryKey: queryKeys.adminUsers, queryFn: () => api.get<UserSummary[]>("/backoffice/users"), enabled });
+}
+
+/** Cuentas del servicio de identidad (alias y roles), filtradas por el comienzo del alias. Solo administrador. */
+export function useIdentityUsers(query: string, enabled: boolean) {
+  const api = useIdentityApi();
+  return useQuery({
+    queryKey: queryKeys.identityUsers(query),
+    queryFn: () => api.get<IdentityUser[]>(`/identity/admin/users?q=${encodeURIComponent(query)}`),
+    enabled,
+  });
+}
+
+/** Reemplaza los roles de una cuenta (`player` siempre se conserva). Cierra sus sesiones abiertas. */
+export function useSetRoles() {
+  const api = useIdentityApi();
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, roles }: { id: string; roles: string[] }) => api.put<void>(`/identity/admin/users/${id}/roles`, { roles }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: queryKeys.identityUsersAll }),
+  });
 }
 
 /** Cuenta de cualquier jugador (solo administrador). */
@@ -342,6 +364,18 @@ export function useTableRules(gameId: string) {
   return useQuery({ queryKey: queryKeys.tableRules(gameId), queryFn: () => api.get<TableRules>(`/games/${gameId}/rules`), staleTime: 5 * 60_000 });
 }
 
+/** Cotiza una mesa antes de crearla: lo que se reserva por asiento y el desglose (o el motivo si no es valida). */
+export function useTableQuote(gameId: string, body: CreateTableBody, enabled: boolean) {
+  const api = useApi();
+  return useQuery({
+    queryKey: ["tables", gameId, "quote", JSON.stringify(body)],
+    queryFn: () => api.post<TableQuoteResult>(`/games/${gameId}/quote`, body),
+    enabled,
+    retry: false,
+    staleTime: 30_000,
+  });
+}
+
 /** Las mesas abiertas y las propias en curso. Se refresca cada 3 s (respaldo del aviso en vivo `tableChanged`). */
 export function useTables(gameId: string) {
   const api = useApi();
@@ -383,7 +417,8 @@ export function useJoinTable(gameId: string) {
   const api = useApi();
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: ({ tableId, code }: { tableId: string; code?: string }) => api.post<void>(`/games/${gameId}/tables/${tableId}/join`, code ? { code } : undefined),
+    mutationFn: ({ tableId, code, amount }: { tableId: string; code?: string; amount?: number }) =>
+      api.post<void>(`/games/${gameId}/tables/${tableId}/join`, code || amount !== undefined ? { ...(code ? { code } : {}), ...(amount !== undefined ? { amount } : {}) } : undefined),
     onSettled: () => queryClient.invalidateQueries({ queryKey: queryKeys.tablesOf(gameId) }),
   });
 }
@@ -405,6 +440,16 @@ export function useLeaveTable(gameId: string) {
   return useMutation({
     mutationFn: (tableId: string) => api.post<void>(`/games/${gameId}/tables/${tableId}/leave`),
     onSettled: () => queryClient.invalidateQueries({ queryKey: queryKeys.tablesOf(gameId) }),
+  });
+}
+
+/** Mesa libre: sumar fichas a mi pila. Se reservan en la Wallet y entran a la pila al empezar la mano siguiente. La clave evita reservar dos veces si se reintenta. */
+export function useTopUp(gameId: string, tableId: string) {
+  const api = useApi();
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ amount, idempotencyKey }: { amount: number; idempotencyKey: string }) => api.post<void>(`/games/${gameId}/tables/${tableId}/topup`, { amount }, { "Idempotency-Key": idempotencyKey }),
+    onSettled: () => queryClient.invalidateQueries({ queryKey: queryKeys.table(gameId, tableId) }),
   });
 }
 

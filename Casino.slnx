@@ -6,6 +6,7 @@
     <Project Path="src/Casino.Contracts/Casino.Contracts.csproj" />
     <Project Path="src/Casino.GamesService/Casino.GamesService.csproj" />
     <Project Path="src/Casino.Hosting/Casino.Hosting.csproj" />
+    <Project Path="src/Casino.IdentityService/Casino.IdentityService.csproj" />
     <Project Path="src/Casino.ServiceDefaults/Casino.ServiceDefaults.csproj" />
     <Project Path="src/Casino.WalletService/Casino.WalletService.csproj" />
   </Folder>
@@ -43,6 +44,9 @@
   <Folder Name="/src/Modules/Realtime/">
     <Project Path="src/Modules/Realtime/Casino.Modules.Realtime.csproj" />
   </Folder>
+  <Folder Name="/src/Modules/Identity/">
+    <Project Path="src/Modules/Identity/Casino.Modules.Identity.csproj" />
+  </Folder>
   <Folder Name="/src/Modules/Users/">
     <Project Path="src/Modules/Users/Casino.Modules.Users.csproj" />
   </Folder>
@@ -52,6 +56,9 @@
   <Folder Name="/tests/" />
   <Folder Name="/tests/Games.Tests/">
     <Project Path="tests/Games.Tests/Casino.Games.Tests.csproj" />
+  </Folder>
+  <Folder Name="/tests/Identity.Tests/">
+    <Project Path="tests/Identity.Tests/Casino.Identity.Tests.csproj" />
   </Folder>
   <Folder Name="/tests/Integration.Tests/">
     <Project Path="tests/Integration.Tests/Casino.Integration.Tests.csproj" />

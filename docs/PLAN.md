@@ -25,7 +25,7 @@ La Wallet es el corazón del sistema: todo lo demás mueve fichas a través de e
 | Game Engine | Tragamonedas, ruleta y blackjack con RNG verificable | Provably fair, lógica de dominio pura, testing |
 | Lobby / Frontend | Catálogo de juegos, mesas, historial, animaciones | React + PixiJS, UX, tiempo real |
 | Realtime | Saldo y resultados en vivo, mesas multijugador | SignalR con backplane Redis |
-| Usuarios | Registro, login, límites de juego responsable | Identidad (Keycloak o Entra External ID), protección de PII |
+| Usuarios | Registro, login, límites de juego responsable | Identidad propia (ASP.NET Core Identity + OpenIddict; antes Keycloak), protección de PII |
 | Bonos y promociones | Fichas de bienvenida, bonos diarios, torneos | Reglas configurables, eventos, jobs programados |
 | Backoffice | Reportes, auditoría, ajustes manuales con doble aprobación | Proyecciones de lectura (CQRS), roles |
 | Juego responsable (IA) | Detectar patrones de riesgo y aplicar límites | Agentes de IA sobre eventos del dominio |
@@ -48,7 +48,7 @@ La API solo inicia operaciones; Wallet y Game Engine se coordinan por eventos y 
 | Resiliencia | Polly v8 (Microsoft.Extensions.Resilience) | Reintentos, circuit breaker, timeouts |
 | Observabilidad | OpenTelemetry + dashboard de Aspire; Grafana o Application Insights | Trazas que cruzan la cola de mensajes |
 | Frontend | React + Vite + PixiJS para los juegos | Phaser como alternativa para juegos más complejos |
-| Identidad | Keycloak en local o Entra External ID | OIDC, JWT, roles para backoffice |
+| Identidad | Servicio propio (ASP.NET Core Identity + OpenIddict) | OIDC, JWT, roles para backoffice |
 | Testing | xUnit, Testcontainers, k6 | Integración con infraestructura real y carga |
 | Nube | Azure Container Apps, Key Vault, Azure DevOps o GitHub Actions | Infra como código con Bicep |
 
@@ -119,16 +119,16 @@ Seis fases de 1 a 2 semanas cada una; la fase 1 sola ya deja material sólido pa
 - [x] Tragamonedas con cascadas y multiplicador creciente, retorno exacto incluyendo las cascadas (ver ADR 0013)
 - [x] Historial de jugadas y movimientos (jugadas con verificación y extracto de movimientos de saldo derivado del ledger; el admin tiene el historial general de cargas)
 - [ ] Animaciones de premios, sonido y modo oscuro (modo oscuro hecho; faltan animaciones de premios y sonido)
-- [x] Login con Keycloak o Entra External ID (Keycloak)
+- [x] Login con Keycloak o Entra External ID (Keycloak; reemplazado por identidad propia, ADR 0017)
 
 ### Fase 4 — Distribuir y endurecer (2 semanas)
 
 - [x] Extraer Wallet y Game Engine como servicios independientes (hecho: Wallet y juegos, cada uno con su base, gateway YARP y pruebas distribuidas; ver ADR 0007 y 0008)
-- [ ] Resiliencia con Polly: reintentos, circuit breaker, timeouts
+- [x] Resiliencia con Polly: reintentos, circuit breaker, timeouts (en el gateway hacia cada servicio, `GatewayResilience.cs`: timeout por intento, reintento solo de lecturas y circuito por servicio; YARP no usa el handler estandar de ServiceDefaults)
 - [ ] Dead-letter queues con alertas
-- [ ] Trazas de OpenTelemetry de punta a punta a través de la cola
+- [x] Trazas de OpenTelemetry de punta a punta a través de la cola (Wolverine y Marten se exportan como fuentes de traza; `TracePropagationTests` verifica que la petición y el mensaje que dispara en otro servicio comparten traza)
 - [x] Pruebas de carga con k6 y métricas de latencia p95/p99 (`tests/load`, línea base y comparación en `docs/pruebas-de-carga.md`)
-- [ ] Chaos: tirar Game Engine a mitad de apuesta y verificar que el saldo cierra
+- [x] Chaos: tirar Game Engine a mitad de apuesta y verificar que el saldo cierra (`ChaosTests`: se cae el servicio de juegos en tres momentos distintos, se reinicia y la apuesta se liquida una vez con el saldo cerrado)
 - [ ] Cambiar RabbitMQ por Azure Service Bus sin tocar el dominio
 
 ### Fase 5 — Extras modernos (abierta)

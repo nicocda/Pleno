@@ -296,11 +296,13 @@ a { color: inherit; }
 
 /* ---- Tapete y rueda (3b) ---- */
 .board { display: grid; gap: 10px; margin: 6px 0 14px; }
-.board__numbers { position: relative; display: grid; grid-template-columns: repeat(13, 1fr); grid-template-rows: repeat(3, 44px); gap: 0; padding: 0; overflow: visible; background: var(--felt); border: 2px solid var(--gold); border-radius: var(--radius); }
+.board__numbers { position: relative; display: grid; grid-template-columns: repeat(14, 1fr); grid-template-rows: repeat(3, 44px); gap: 0; padding: 0; overflow: visible; background: var(--felt); border: 2px solid var(--gold); border-radius: var(--radius); }
 .cell { position: relative; display: grid; place-items: center; font: inherit; font-weight: 800; font-size: 0.85rem; color: #fff; border: 1px solid rgb(255 255 255 / 0.35); border-radius: 4px; cursor: pointer; }
 .cell--red { background: var(--red); }
 .cell--black { background: var(--black); }
 .cell--green { background: var(--green); }
+/* Toque largo para sacar fichas: sin menu ni seleccion del sistema ni zoom por doble toque. */
+.cell, .outside, .hotspot { -webkit-touch-callout: none; user-select: none; touch-action: manipulation; }
 .cell:hover:not(:disabled) { outline: 2px solid var(--gold-soft); }
 .cell--on { outline: 3px solid var(--gold); z-index: 2; }
 .cell--winner { box-shadow: 0 0 0 3px var(--win), 0 0 16px var(--win); z-index: 2; }
@@ -311,8 +313,10 @@ a { color: inherit; }
 .board__outside { display: grid; gap: 6px; }
 .board__row { display: grid; gap: 6px; }
 .board__row--3 { grid-template-columns: repeat(3, 1fr); }
-.board__row--6 { grid-template-columns: repeat(6, 1fr); }
+.board__row--2 { grid-template-columns: repeat(2, 1fr); }
+.board__row--4 { grid-template-columns: repeat(4, 1fr); }
 .outside { position: relative; display: grid; gap: 1px; justify-items: center; padding: 8px 4px; font: inherit; font-weight: 700; color: var(--text); background: var(--felt); border: 1px solid var(--gold); border-radius: 8px; cursor: pointer; }
+.outside--col { padding: 0; border-radius: 4px; font-size: 0.7rem; align-content: center; }
 .outside small { font-weight: 500; font-size: 0.7rem; color: var(--gold-soft); }
 .outside--red { background: var(--red); color: #fff; }
 .outside--black { background: var(--black); color: #fff; }
@@ -892,3 +896,5 @@ button.tru-card--playable:hover { transform: translateY(-14px); }
 [data-perf="lite"] .dock { box-shadow: none; }
 [data-perf="lite"] .win-modal--mega .win-modal__box { box-shadow: none; }
 .perf-select { background: var(--surface); color: inherit; border: 1px solid var(--line); border-radius: 10px; padding: 6px 8px; }
+.admin-roles { display: flex; flex-wrap: wrap; gap: 4px 14px; }
+.admin-roles__option { display: inline-flex; align-items: center; gap: 6px; font-size: 0.9rem; }

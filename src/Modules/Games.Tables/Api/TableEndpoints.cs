@@ -8,9 +8,15 @@ using Microsoft.AspNetCore.Routing;
 namespace Casino.Modules.Games.Tables;
 
 /// <summary>Crear una mesa. La identidad sale del token; el cuerpo solo dice como es la mesa.</summary>
-public sealed record CreateTableBody(long BuyIn, int MaxPlayers, bool IsPrivate = false, string? Name = null);
+public sealed record CreateTableBody(long BuyIn, int MaxPlayers, bool IsPrivate = false, string? Name = null, System.Text.Json.JsonElement? Options = null);
 
-public sealed record JoinTableBody(string? Code = null);
+/// <summary>Cotizar una mesa antes de crearla: lo mismo que el cuerpo de crear, sin nombre ni privacidad.</summary>
+public sealed record QuoteTableBody(long BuyIn, int MaxPlayers, System.Text.Json.JsonElement? Options = null);
+
+public sealed record JoinTableBody(string? Code = null, long? Amount = null);
+
+/// <summary>Recargar fichas en una mesa libre.</summary>
+public sealed record TopUpBody(long Amount);
 
 public sealed record TableCreatedResponse(Guid TableId, string? JoinCode, bool AlreadyCreated);
 
@@ -38,13 +44,20 @@ internal static class TableEndpoints
         group.MapGet("/rules", (TableService tables) =>
         {
             var game = tables.GameOf(gameId);
-            return Results.Ok(new { game.MinPlayers, game.MaxPlayers, game.MinBuyIn, game.MaxBuyIn });
+            return Results.Ok(new { game.MinPlayers, game.MaxPlayers, game.MinBuyIn, game.MaxBuyIn, game.AllowsBots, game.Options });
+        });
+
+        // Cuanto se reserva por asiento (entrada, comision, recompras...) y si la mesa es valida, antes de crearla.
+        group.MapPost("/quote", (QuoteTableBody body, TableService tables) =>
+        {
+            var quote = tables.Quote(gameId, body.BuyIn, body.MaxPlayers, body.Options);
+            return Results.Ok(new { quote.Stake, quote.Description, quote.Breakdown });
         });
 
         group.MapPost("/tables", async (CreateTableBody body, HttpContext http, TableService tables, CancellationToken ct) =>
         {
             var userId = http.User.GetUserId();
-            var created = await tables.CreateAsync(userId, PlayerIds.WalletAccountFor(userId), gameId, body.BuyIn, body.MaxPlayers, body.IsPrivate, body.Name, http.Request.Headers[IdempotencyHeader].ToString(), ct);
+            var created = await tables.CreateAsync(userId, PlayerIds.WalletAccountFor(userId), gameId, body.BuyIn, body.MaxPlayers, body.IsPrivate, body.Name, http.Request.Headers[IdempotencyHeader].ToString(), body.Options, ct);
             return Results.Accepted($"/games/{gameId}/tables/{created.TableId}", new TableCreatedResponse(created.TableId, created.JoinCode, created.AlreadyCreated));
         });
 
@@ -56,14 +69,22 @@ internal static class TableEndpoints
         group.MapPost("/tables/join", async (JoinTableBody body, HttpContext http, TableService tables, CancellationToken ct) =>
         {
             var userId = http.User.GetUserId();
-            var tableId = await tables.JoinByCodeAsync(userId, PlayerIds.WalletAccountFor(userId), gameId, body.Code ?? string.Empty, ct);
+            var tableId = await tables.JoinByCodeAsync(userId, PlayerIds.WalletAccountFor(userId), gameId, body.Code ?? string.Empty, body.Amount, ct);
             return Results.Accepted($"/games/{gameId}/tables/{tableId}", new { tableId });
         });
 
         group.MapPost("/tables/{tableId:guid}/join", async (Guid tableId, JoinTableBody? body, HttpContext http, TableService tables, CancellationToken ct) =>
         {
             var userId = http.User.GetUserId();
-            await tables.JoinAsync(userId, PlayerIds.WalletAccountFor(userId), tableId, body?.Code, ct);
+            await tables.JoinAsync(userId, PlayerIds.WalletAccountFor(userId), tableId, body?.Code, body?.Amount, ct);
+            return Results.Accepted();
+        });
+
+        // Mesa libre: sumar fichas a mi pila (se reservan en la Wallet y entran a la pila al empezar la mano siguiente).
+        group.MapPost("/tables/{tableId:guid}/topup", async (Guid tableId, TopUpBody body, HttpContext http, TableService tables, CancellationToken ct) =>
+        {
+            var userId = http.User.GetUserId();
+            await tables.TopUpAsync(userId, PlayerIds.WalletAccountFor(userId), tableId, body.Amount, http.Request.Headers[IdempotencyHeader].ToString(), ct);
             return Results.Accepted();
         });
 

@@ -18,7 +18,7 @@
     <PackageReference Include="Testcontainers.RabbitMq" Version="4.16.0" />
     <PackageReference Include="Testcontainers.Redis" Version="4.16.0" />
     <PackageReference Include="xunit" Version="2.9.3" />
-    <PackageReference Include="xunit.runner.visualstudio" Version="4.0.0" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="4.0.1" />
   </ItemGroup>
 
   <ItemGroup>
@@ -34,11 +34,7 @@
     <ProjectReference Include="..\..\src\Modules\Games.Slots\Casino.Modules.Games.Slots.csproj" />
     <ProjectReference Include="..\..\src\Casino.GamesService\Casino.GamesService.csproj" />
     <ProjectReference Include="..\..\src\Casino.Contracts\Casino.Contracts.csproj" />
-  </ItemGroup>
-
-  <ItemGroup>
-    <!-- El mismo realm que usa el AppHost: la prueba con Keycloak real importa exactamente esto. -->
-    <None Include="..\..\src\Casino.AppHost\realms\casino-realm.json" Link="realms\casino-realm.json" CopyToOutputDirectory="PreserveNewest" />
+    <ProjectReference Include="..\..\src\Casino.IdentityService\Casino.IdentityService.csproj" />
   </ItemGroup>
 
 </Project>

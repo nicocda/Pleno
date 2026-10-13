@@ -62,7 +62,8 @@ public static class Extensions
             })
             .WithTracing(tracing =>
             {
-                tracing.AddSource(builder.Environment.ApplicationName)
+                // Wolverine pone el traceparent en el sobre de cada mensaje: lo enviado y lo recibido por la cola comparten traza.
+                tracing.AddSource(builder.Environment.ApplicationName, "Wolverine", "Marten")
                     .AddAspNetCoreInstrumentation(tracing =>
                         // Exclude health check requests from tracing
                         tracing.Filter = context =>

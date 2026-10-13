@@ -12,7 +12,7 @@ const shortId = (id: string) => `${id.slice(0, 8)}…${id.slice(-4)}`;
 const PARENT_LEVEL: Record<HierarchyLevel, HierarchyLevel | null> = { player: "cashier", cashier: "head_cashier", head_cashier: null };
 const LEVELS: HierarchyLevel[] = ["head_cashier", "cashier", "player"];
 
-/** Backoffice: arma el arbol de cargas (jefe de cajeros → cajero → jugador). Los roles de Keycloak dan acceso; este arbol dice a quien se le puede cargar. */
+/** Backoffice: arma el arbol de cargas (jefe de cajeros → cajero → jugador). Los roles de la cuenta dan acceso; este arbol dice a quien se le puede cargar. */
 export function AdminHierarchy() {
   const me = useMe();
   const isAdmin = me.data?.roles.includes(BACKOFFICE_ROLE) ?? false;
@@ -51,7 +51,7 @@ export function AdminHierarchy() {
         <h1 id="jerarquia-titulo" className="display">Cajeros y jerarquía</h1>
         <p className="muted">
           El jefe de cajeros recibe fichas del administrador y se las carga a sus cajeros; cada cajero las carga a sus jugadores. Ubicá acá a cada uno y de quién depende. Además, la persona tiene que
-          tener el rol <code>cashier</code> o <code>head_cashier</code> en Keycloak. <Link to="/admin">Volver al panel</Link>
+          tener el rol <code>cashier</code> o <code>head_cashier</code> (se asigna en <Link to="/admin/roles">roles de las cuentas</Link>). <Link to="/admin">Volver al panel</Link>
         </p>
       </section>
 

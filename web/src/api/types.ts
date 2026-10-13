@@ -1,5 +1,14 @@
 // Contratos de la API (JSON en camelCase). Las fichas son siempre enteros: nunca decimales.
 
+/** Una cuenta vista desde el administrador de roles: alias y roles (nunca el email). */
+export interface IdentityUser {
+  id: string;
+  alias: string;
+  roles: string[];
+  emailConfirmed: boolean;
+  createdAt: string;
+}
+
 /** Un jugador visto desde el panel de administracion: solo id y fecha de alta (no hay datos personales). */
 export interface UserSummary {
   userId: string;
@@ -467,6 +476,33 @@ export interface TableRules {
   maxPlayers: number;
   minBuyIn: number;
   maxBuyIn: number;
+  /** Si se pueden sumar bots a la mesa (el poker no los tiene). Ausente = si. */
+  allowsBots?: boolean;
+  /** Opciones propias del juego al crear la mesa (ciegas, recompras...). */
+  options?: TableOptionDef[];
+}
+
+/** Una opcion al crear la mesa: `number` (campo numerico, opcional) o `choice` (una de `choices`). */
+export interface TableOptionDef {
+  key: string;
+  label: string;
+  hint: string;
+  kind: "number" | "choice";
+  choices?: number[] | null;
+  min?: number | null;
+  max?: number | null;
+  default?: number | null;
+  /** El texto de cada valor de `choices` (misma posicion). */
+  labels?: string[] | null;
+  /** Se muestra solo si otra opcion tiene ese valor ("mode=0"). */
+  visibleWhen?: string | null;
+}
+
+/** Cuanto cuesta crear esa mesa: lo que se reserva por asiento y el desglose. */
+export interface TableQuoteResult {
+  stake: number;
+  description: string | null;
+  breakdown: string | null;
 }
 
 /** Una mesa en el listado. `mine`: estoy sentado. */
@@ -482,6 +518,14 @@ export interface TableSummary {
   mine: boolean;
   isPrivate: boolean;
   createdAt: string;
+  /** Lo que se reserva por asiento (la entrada mas lo que el juego sume: comision, recompras). Ausente = la entrada. */
+  stake?: number;
+  /** Un resumen de las opciones de la mesa ("Ciegas 2/4 · 1 recompra"). */
+  description?: string | null;
+  /** Mesa libre: no termina, se entra con las fichas que se quiera dentro de un rango y se sale cuando se quiere. */
+  continuous?: boolean;
+  minEntry?: number;
+  maxEntry?: number;
 }
 
 export interface CreateTableBody {
@@ -489,6 +533,8 @@ export interface CreateTableBody {
   maxPlayers: number;
   isPrivate?: boolean;
   name?: string;
+  /** Las opciones propias del juego elegidas (clave -> valor). */
+  options?: Record<string, number>;
 }
 
 export interface TableCreated {
@@ -507,6 +553,8 @@ export interface TableSeat {
   ready: boolean;
   away: boolean;
   payout: number | null;
+  /** Mesa libre: asiento sin nadie. */
+  vacant?: boolean;
 }
 
 /** La mesa vista por mi asiento. `game` es la vista propia de cada juego (null hasta que empieza). */
@@ -530,6 +578,11 @@ export interface TableState<G = unknown> {
   turnEndsAt: string | null;
   game: G | null;
   payouts: number[] | null;
+  stake?: number;
+  description?: string | null;
+  continuous?: boolean;
+  minEntry?: number;
+  maxEntry?: number;
 }
 
 // Uno
@@ -557,6 +610,8 @@ export interface UnoView {
   drawnCard: number | null;
   winner: number;
   events: UnoEvent[];
+  /** Cartas que roba quien tiene el turno si no suma otro +2 / +4 (0 = ninguna). */
+  pendingDraw: number;
 }
 
 /** La jugada propia de Uno. */
@@ -564,9 +619,9 @@ export type UnoAction = { type: "play"; card: number; color?: number } | { type:
 
 // Poker (Texas Hold'em de una mano por mesa)
 export type PokerStreet = "preflop" | "flop" | "turn" | "river" | "done";
-export type PokerEventKind = "blind" | "fold" | "check" | "call" | "bet" | "raise" | "flop" | "turn" | "river" | "win" | "win_showdown";
+export type PokerEventKind = "blind" | "fold" | "check" | "call" | "bet" | "raise" | "flop" | "turn" | "river" | "win" | "win_showdown" | "hand" | "out" | "rebuy" | "sit" | "leave" | "leaving" | "topup";
 export type PokerCategoryName = "HighCard" | "Pair" | "TwoPair" | "ThreeOfAKind" | "Straight" | "Flush" | "FullHouse" | "FourOfAKind" | "StraightFlush";
-export type PokerActionName = "call" | "check" | "fold" | "raise";
+export type PokerActionName = "call" | "check" | "fold" | "raise" | "decline" | "rebuy";
 
 export interface PokerEvent {
   /** -1 en los eventos de calle (flop, turn, river). */
@@ -587,6 +642,27 @@ export interface PokerPlayer {
   /** null salvo las propias y, al showdown, las de quienes siguen en la mano. */
   cards: number[] | null;
   cardCount: number;
+  /** Se quedo sin fichas y no vuelve: ya no juega manos. */
+  out: boolean;
+  /** Recompras que le quedan. */
+  rebuysLeft: number;
+  /** Se quedo sin fichas y tiene que decidir si recompra (hasta que vence la pausa). */
+  awaitingRebuy: boolean;
+  /** Mesa libre: asiento libre. */
+  vacant: boolean;
+  /** Mesa libre: fichas recargadas que entran a la pila en la mano siguiente (solo las ve su dueño). */
+  pendingChips: number;
+  /** Mesa libre: pidio levantarse y se va al terminar la mano. */
+  leaving: boolean;
+}
+
+/** Un pozo de la mano (el principal o uno lateral) con quienes podian ganarlo y quienes lo ganaron. */
+export interface PokerPot {
+  amount: number;
+  /** Lo que se llevo la casa de este pozo (mesa libre). */
+  rake: number;
+  eligible: number[];
+  winners: number[];
 }
 
 export interface PokerShowdownEntry {
@@ -615,12 +691,47 @@ export interface PokerView {
   actions: PokerActionName[];
   showdown: PokerShowdownEntry[];
   winnings: number[];
+  /** La MANO termino (la partida sigue salvo que `over`). */
   done: boolean;
   events: PokerEvent[];
+  /** Numero de la mano en curso (desde 1). */
+  handNo: number;
+  /** La PARTIDA termino: queda uno con todas las fichas. */
+  over: boolean;
+  /** Compromiso (SHA-256) de la semilla de esta mano, publicado antes de repartir. */
+  commitment: string;
+  /** La semilla de la mano, revelada cuando la mano termina. */
+  handSeed: string | null;
+  pots: PokerPot[];
+  smallBlind: number;
+  bigBlind: number;
+  /** La ciega grande del proximo nivel y cuantas manos faltan para que suba. */
+  nextBigBlind: number;
+  handsToNextLevel: number;
+  /** Recompras que permite la mesa por jugador. */
+  rebuys: number;
+  entry: number;
+  fee: number;
+  /** Lo que se reparte entre los primeros (una entrada por asiento y por recompra, sin la comision) y como. */
+  prizePool: number;
+  prizes: number[];
+  /** Los asientos del primero al ultimo, cuando la partida termino. */
+  ranking: number[];
+  /** Mesa libre (no es un torneo). */
+  cash: boolean;
+  /** Mesa libre sin mano en juego: faltan jugadores con fichas (hacen falta 2). */
+  waiting: boolean;
+  /** El rake de la casa en milesimas del pozo (30 = 3 %), lo recaudado en total y lo de la ultima mano. */
+  rakePermille: number;
+  rakeTotal: number;
+  handRake: number;
+  /** La pila minima y maxima con la que se puede estar sentado en una mesa libre. */
+  minEntry: number;
+  maxEntry: number;
 }
 
 /** La jugada propia de Poker. `to`: monto TOTAL al que se sube en esta ronda. */
-export type PokerAction = { type: "fold" } | { type: "check" } | { type: "call" } | { type: "raise"; to: number };
+export type PokerAction = { type: "fold" } | { type: "check" } | { type: "call" } | { type: "raise"; to: number } | { type: "rebuy" } | { type: "decline" };
 
 // Truco
 export type TrucoEventKind = "start" | "play" | "truco" | "retruco" | "vale4" | "envido" | "real_envido" | "falta_envido" | "quiero" | "no_quiero" | "mazo" | "baza" | "parda" | "envido_result" | "hand_end";

@@ -102,6 +102,20 @@ export function eventText(event: PokerEvent, nameOf: (seat: number) => string, b
       return board.length >= 4 ? `Turn: ${decodeCard(board[3]!).label}` : "Turn";
     case "river":
       return board.length >= 5 ? `River: ${decodeCard(board[4]!).label}` : "River";
+    case "hand":
+      return `Mano ${event.amount ?? 0}`;
+    case "out":
+      return `${who} quedó eliminado`;
+    case "rebuy":
+      return `${who} recompró`;
+    case "sit":
+      return `${who} se sentó con ${amount}`;
+    case "leave":
+      return `${who} se levantó con ${amount}`;
+    case "leaving":
+      return `${who} se levanta al terminar la mano`;
+    case "topup":
+      return `${who} recargó ${amount}`;
     case "win":
       return `${who} se llevó ${amount}`;
     case "win_showdown": {

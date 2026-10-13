@@ -144,6 +144,7 @@ function UnoTable({ table, onLeave }: { table: LiveTable<UnoView>; onLeave: () =
 
   const statusLabel = finished ? (winner < 0 ? "La partida terminó sin ganador" : winner === mySeat ? "¡Ganaste!" : `Ganó ${nameOf(winner)}`)
     : mySeat === null ? `Mirando la partida: juega ${nameOf(game.current)}`
+    : myTurn && game.pendingDraw > 0 ? `Te tocan ${game.pendingDraw} cartas: ${game.playable.length > 0 ? "sumá otra carta de robo o robalas" : "robalas"} (${turnSeconds} s)`
     : myTurn ? (game.drawnCard !== null ? `Robaste ${decodeCard(game.drawnCard).label}: jugala o pasá (${turnSeconds} s)` : `Es tu turno: jugá una carta o robá (${turnSeconds} s)`)
     : `Juega ${nameOf(game.current)}${table.seats.find((s) => s.seat === game.current)?.away ? " (ausente: lo juega un bot)" : ""}`;
 
@@ -183,7 +184,7 @@ function UnoTable({ table, onLeave }: { table: LiveTable<UnoView>; onLeave: () =
             <button type="button" className={`uno-pile ${mustDraw ? "uno-pile--call" : ""}`} data-level={pileLevel} aria-label="Robar carta" disabled={!myTurn || game.drawnCard !== null || act.isPending} onClick={() => send({ type: "draw" })}>
               <span className="uno-pile__back" aria-hidden="true">UNO</span>
               <span className="uno-pile__count">{game.drawCount} en el mazo</span>
-              {mustDraw && <span className="uno-pile__hint" aria-hidden="true">¡Tocá para robar!</span>}
+              {mustDraw && <span className="uno-pile__hint" aria-hidden="true">{game.pendingDraw > 0 ? `¡Tocá para robar ${game.pendingDraw}!` : "¡Tocá para robar!"}</span>}
             </button>
             <div className="uno-top">
               <span className="uno-discard">
@@ -303,8 +304,8 @@ function UnoTable({ table, onLeave }: { table: LiveTable<UnoView>; onLeave: () =
           <div className="win-modal__box" onClick={(e) => e.stopPropagation()}>
             <p className="crash-multiplier crash-multiplier--running" aria-hidden="true">UNO</p>
             <h2 id="win-title" className="win-modal__title">¡Ganaste!</h2>
-            <p className="win-modal__amount">+{formatChips(net)} fichas</p>
-            <p className="muted">Pusiste {formatChips(table.buyIn)} y cobraste {formatChips(payout ?? 0)}.</p>
+            <p className="win-modal__amount">{formatChips(payout ?? 0)} fichas</p>
+            <p className="muted">Pusiste {formatChips(table.buyIn)}.</p>
             <button type="button" className="btn btn--gold" autoFocus onClick={() => setWinClosed(true)}>
               Continuar
             </button>

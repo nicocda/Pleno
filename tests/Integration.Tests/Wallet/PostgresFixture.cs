@@ -25,6 +25,9 @@ public sealed class PostgresFixture : IAsyncLifetime
     /// <summary>La base del servicio de juegos.</summary>
     public string GamesDbConnectionString { get; private set; } = string.Empty;
 
+    /// <summary>La base del servicio de identidad.</summary>
+    public string IdentityDbConnectionString { get; private set; } = string.Empty;
+
     public IDocumentStore Store { get; private set; } = null!;
 
     public WalletService Wallet { get; private set; } = null!;
@@ -54,6 +57,7 @@ public sealed class PostgresFixture : IAsyncLifetime
         WalletDbConnectionString = await CreateDatabaseAsync("walletdb");
         UsersDbConnectionString = await CreateDatabaseAsync("usersdb");
         GamesDbConnectionString = await CreateDatabaseAsync("gamesdb");
+        IdentityDbConnectionString = await CreateDatabaseAsync("identitydb");
         Wallet = new WalletService(Store, TimeProvider.System);
         Fairness = new FairnessService(Store, Protector, TimeProvider.System);
     }
@@ -94,7 +98,7 @@ public sealed class PostgresFixture : IAsyncLifetime
 }
 
 [CollectionDefinition(Name)]
-public sealed class WalletDbDefinition : ICollectionFixture<PostgresFixture>, ICollectionFixture<RabbitMqFixture>, ICollectionFixture<Casino.Integration.Tests.Users.KeycloakFixture>, ICollectionFixture<RedisFixture>
+public sealed class WalletDbDefinition : ICollectionFixture<PostgresFixture>, ICollectionFixture<RabbitMqFixture>, ICollectionFixture<RedisFixture>
 {
     public const string Name = "wallet-db";
 }

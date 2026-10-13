@@ -50,7 +50,7 @@ public static class UsersModule
                 return Results.Ok(new MeResponse(
                     userId,
                     http.User.FindFirst("preferred_username")?.Value,
-                    [.. http.User.FindAll(ClaimTypes.Role).Select(role => role.Value).Order()],
+                    [.. http.User.GetRoles().Order()],
                     PlayerIds.WalletAccountFor(userId),
                     profile.RegisteredAt));
             })
