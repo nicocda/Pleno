@@ -34,11 +34,7 @@
     <ProjectReference Include="..\..\src\Modules\Games.Slots\Casino.Modules.Games.Slots.csproj" />
     <ProjectReference Include="..\..\src\Casino.GamesService\Casino.GamesService.csproj" />
     <ProjectReference Include="..\..\src\Casino.Contracts\Casino.Contracts.csproj" />
-  </ItemGroup>
-
-  <ItemGroup>
-    <!-- El mismo realm que usa el AppHost: la prueba con Keycloak real importa exactamente esto. -->
-    <None Include="..\..\src\Casino.AppHost\realms\casino-realm.json" Link="realms\casino-realm.json" CopyToOutputDirectory="PreserveNewest" />
+    <ProjectReference Include="..\..\src\Casino.IdentityService\Casino.IdentityService.csproj" />
   </ItemGroup>
 
 </Project>

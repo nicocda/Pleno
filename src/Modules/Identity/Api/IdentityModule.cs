@@ -7,6 +7,7 @@ using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.Google;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.AspNetCore.Routing;
@@ -26,6 +27,7 @@ public static class IdentityModule
     public const string Audience = "casino-api";
     public const string WebClientId = "casino-web";
     public const string RateLimitPolicy = "identity-auth";
+    public const string CorsPolicy = "identity-web";
 
     public static WebApplicationBuilder AddIdentityModule(this WebApplicationBuilder builder)
     {
@@ -82,6 +84,12 @@ public static class IdentityModule
             .AddServer(server =>
             {
                 server.SetTokenEndpointUris("/connect/token");
+                // El emisor (iss) tiene que ser exactamente la URL que los servicios tienen como Authority.
+                if (builder.Configuration["Identity:Issuer"] is { Length: > 0 } issuer)
+                {
+                    server.SetIssuer(new Uri(issuer));
+                }
+
                 server.AllowPasswordFlow().AllowRefreshTokenFlow().AllowCustomFlow(TokenEndpoint.ExternalCodeGrant);
                 server.SetAccessTokenLifetime(TimeSpan.FromMinutes(10));
                 server.SetRefreshTokenLifetime(TimeSpan.FromDays(14));
@@ -100,8 +108,30 @@ public static class IdentityModule
                 validation.UseAspNetCore();
             });
 
+        var origins = builder.Configuration.GetSection("Identity:AllowedReturnOrigins").Get<string[]>() ?? new IdentityLinksOptions().AllowedReturnOrigins;
+        services.AddCors(cors => cors.AddPolicy(CorsPolicy, policy => policy.WithOrigins(origins).AllowAnyHeader().AllowAnyMethod()));
+        // Detras del proxy (Caddy) llegan la IP, el esquema y el host reales en cabeceras X-Forwarded-*. Solo es seguro si el puerto del servicio no se expone fuera del proxy.
+        services.Configure<ForwardedHeadersOptions>(forwarded =>
+        {
+            forwarded.ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto | ForwardedHeaders.XForwardedHost;
+            forwarded.KnownIPNetworks.Clear();
+            forwarded.KnownProxies.Clear();
+        });
+
         services.AddHostedService<IdentityInitializer>();
         return builder;
+    }
+
+    /// <summary>Orden del pipeline: cabeceras del proxy, CORS del front, limite de peticiones y autenticacion.</summary>
+    public static WebApplication UseIdentityModule(this WebApplication app)
+    {
+        ArgumentNullException.ThrowIfNull(app);
+        app.UseForwardedHeaders();
+        app.UseCors(CorsPolicy);
+        app.UseRateLimiter();
+        app.UseAuthentication();
+        app.UseAuthorization();
+        return app;
     }
 
     public static IEndpointRouteBuilder MapIdentityModule(this IEndpointRouteBuilder app)

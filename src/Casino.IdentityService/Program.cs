@@ -12,9 +12,7 @@ var app = builder.Build();
 app.MapDefaultEndpoints();
 app.MapGet("/", () => "Casino Identity Service");
 
-app.UseRateLimiter();
-app.UseAuthentication();
-app.UseAuthorization();
+app.UseIdentityModule();
 
 app.MapIdentityModule();
 

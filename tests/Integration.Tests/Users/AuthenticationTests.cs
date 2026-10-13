@@ -113,9 +113,9 @@ public sealed class AuthenticationTests : IDisposable
     }
 
     [Fact]
-    public async Task A_malformed_roles_claim_grants_nothing()
+    public async Task Roles_in_the_old_realm_access_format_grant_nothing()
     {
-        using var client = ClientWith(TestAuth.Token(Guid.NewGuid(), realmAccess: "esto no es json"));
+        using var client = ClientWith(TestAuth.Token(Guid.NewGuid(), roles: [], legacyRealmAccess: new Dictionary<string, object> { ["roles"] = new[] { Roles.Player } }));
 
         Assert.Equal(HttpStatusCode.Forbidden, (await client.GetAsync("/me")).StatusCode);
     }
