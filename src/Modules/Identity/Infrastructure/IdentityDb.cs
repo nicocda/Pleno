@@ -8,6 +8,8 @@ namespace Casino.Modules.Identity.Infrastructure;
 /// <summary>Base <c>identitydb</c>: cuentas, roles y los tokens/clientes de OpenIddict. Solo el servicio de identidad la toca.</summary>
 public sealed class IdentityDb(DbContextOptions<IdentityDb> options) : IdentityDbContext<PlayerUser, IdentityRole<Guid>, Guid>(options)
 {
+    public DbSet<OneTimeToken> OneTimeTokens => Set<OneTimeToken>();
+
     protected override void OnModelCreating(ModelBuilder builder)
     {
         ArgumentNullException.ThrowIfNull(builder);
@@ -20,6 +22,14 @@ public sealed class IdentityDb(DbContextOptions<IdentityDb> options) : IdentityD
             user.Property(u => u.EmailCipher).HasMaxLength(512);
             user.Property(u => u.EmailHash).HasMaxLength(64);
             user.HasIndex(u => u.EmailHash).IsUnique();
+        });
+
+        builder.Entity<OneTimeToken>(token =>
+        {
+            token.HasKey(t => t.Id);
+            token.Property(t => t.Purpose).HasMaxLength(32);
+            token.Property(t => t.TokenHash).HasMaxLength(64);
+            token.HasIndex(t => t.TokenHash).IsUnique();
         });
     }
 }
