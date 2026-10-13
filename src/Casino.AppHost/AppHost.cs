@@ -1,8 +1,17 @@
 var builder = DistributedApplication.CreateBuilder(args);
 
+// Infraestructura con NOMBRES FIJOS y contenedores persistentes: siempre es el mismo contenedor (casino-postgres, casino-redis...) y los mismos volumenes,
+// sin importar desde que carpeta o worktree se corra Aspire. Antes cada ejecucion creaba contenedores nuevos con sufijo aleatorio y cada ruta de AppHost
+// (cada worktree) sus propios volumenes. Persistente = sigue corriendo al cerrar Aspire (se reutiliza en la proxima corrida, arranca al instante):
+// para liberar la memoria, `docker stop casino-postgres casino-redis casino-rabbitmq casino-pgadmin` (o desde Docker Desktop).
+// Contrapartida: todos los worktrees comparten los mismos datos de desarrollo.
 var postgres = builder.AddPostgres("postgres")
-    .WithDataVolume()
-    .WithPgAdmin();
+    .WithContainerName("casino-postgres")
+    .WithLifetime(ContainerLifetime.Persistent)
+    .WithDataVolume("casino-postgres-data")
+    .WithPgAdmin(pgAdmin => pgAdmin
+        .WithContainerName("casino-pgadmin")
+        .WithLifetime(ContainerLifetime.Persistent));
 // Una base de datos POR SERVICIO: ningun servicio lee las tablas de otro. Todas viven en el mismo servidor de Postgres (en la nube
 // serian servidores o instancias separadas, sin cambiar el codigo).
 var walletDb = postgres.AddDatabase("walletdb");
@@ -11,10 +20,14 @@ var gamesDb = postgres.AddDatabase("gamesdb");
 var identityDb = postgres.AddDatabase("identitydb");
 
 var redis = builder.AddRedis("redis")
-    .WithDataVolume();
+    .WithContainerName("casino-redis")
+    .WithLifetime(ContainerLifetime.Persistent)
+    .WithDataVolume("casino-redis-data");
 
 var rabbit = builder.AddRabbitMQ("rabbitmq")
-    .WithDataVolume()
+    .WithContainerName("casino-rabbitmq")
+    .WithLifetime(ContainerLifetime.Persistent)
+    .WithDataVolume("casino-rabbitmq-data")
     .WithManagementPlugin();
 
 // Servicio de identidad (alias, email cifrado, login, Google, roles y emision de tokens OpenID Connect). Puerto fijo: el emisor (issuer) de los
