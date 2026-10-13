@@ -1,7 +1,7 @@
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useApi } from "./ApiProvider";
+import { useApi, useIdentityApi } from "./ApiProvider";
 import { ApiError } from "./client";
-import type { Account, Withdrawal, LoadChipsResult, CashierMe, CashierTransfer, HierarchyLevel, HierarchyNode, JurisdictionMember, CreateTableBody, TableCreated, TableQuoteResult, TableRules, TableState, TableSummary, BlackjackBet, BlackjackTable, BlackjackTableState, CrashBet, CrashCashOut, CrashState, GameInfo, SlotsSettings, SlotsSettingsBody, SlotsSettingsHistoryItem, SlotsSettingsPreview, CreditFilter, CreditHistory, MovementsPage, AuditEntry, CreditResult, FairnessInfo, Me, Paytable, PlaceBetBody, PlacedBet, Round, Spin, UserSummary } from "./types";
+import type { Account, Withdrawal, LoadChipsResult, CashierMe, CashierTransfer, HierarchyLevel, HierarchyNode, JurisdictionMember, CreateTableBody, TableCreated, TableQuoteResult, TableRules, TableState, TableSummary, BlackjackBet, BlackjackTable, BlackjackTableState, CrashBet, CrashCashOut, CrashState, GameInfo, SlotsSettings, SlotsSettingsBody, SlotsSettingsHistoryItem, SlotsSettingsPreview, CreditFilter, CreditHistory, MovementsPage, AuditEntry, CreditResult, FairnessInfo, Me, Paytable, PlaceBetBody, PlacedBet, IdentityUser, Round, Spin, UserSummary } from "./types";
 
 export const queryKeys = {
   spinsAll: ["spins"] as const,
@@ -13,6 +13,8 @@ export const queryKeys = {
   roundsAll: ["rounds"] as const,
   fairness: ["fairness"] as const,
   adminUsers: ["admin", "users"] as const,
+  identityUsers: (query: string) => ["admin", "identity-users", query] as const,
+  identityUsersAll: ["admin", "identity-users"] as const,
   adminAudit: ["admin", "audit"] as const,
   adminCredits: (filter: CreditFilter) => ["admin", "credits", filter] as const,
   adminCreditsAll: ["admin", "credits"] as const,
@@ -111,6 +113,26 @@ export function useRound(betId: string | null) {
 export function useAdminUsers(enabled: boolean) {
   const api = useApi();
   return useQuery({ queryKey: queryKeys.adminUsers, queryFn: () => api.get<UserSummary[]>("/backoffice/users"), enabled });
+}
+
+/** Cuentas del servicio de identidad (alias y roles), filtradas por el comienzo del alias. Solo administrador. */
+export function useIdentityUsers(query: string, enabled: boolean) {
+  const api = useIdentityApi();
+  return useQuery({
+    queryKey: queryKeys.identityUsers(query),
+    queryFn: () => api.get<IdentityUser[]>(`/identity/admin/users?q=${encodeURIComponent(query)}`),
+    enabled,
+  });
+}
+
+/** Reemplaza los roles de una cuenta (`player` siempre se conserva). Cierra sus sesiones abiertas. */
+export function useSetRoles() {
+  const api = useIdentityApi();
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, roles }: { id: string; roles: string[] }) => api.put<void>(`/identity/admin/users/${id}/roles`, { roles }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: queryKeys.identityUsersAll }),
+  });
 }
 
 /** Cuenta de cualquier jugador (solo administrador). */

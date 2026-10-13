@@ -896,3 +896,5 @@ button.tru-card--playable:hover { transform: translateY(-14px); }
 [data-perf="lite"] .dock { box-shadow: none; }
 [data-perf="lite"] .win-modal--mega .win-modal__box { box-shadow: none; }
 .perf-select { background: var(--surface); color: inherit; border: 1px solid var(--line); border-radius: 10px; padding: 6px 8px; }
+.admin-roles { display: flex; flex-wrap: wrap; gap: 4px 14px; }
+.admin-roles__option { display: inline-flex; align-items: center; gap: 6px; font-size: 0.9rem; }

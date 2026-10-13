@@ -1,33 +1,35 @@
-import type { User } from "oidc-client-ts";
-import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import type { OidcManager } from "./oidc";
+import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
+import type { AuthClient, AuthUser } from "./identity";
 
 export type AuthStatus = "loading" | "authenticated" | "anonymous";
 
 export interface AuthApi {
   status: AuthStatus;
-  user: User | null;
-  /** Nombre para mostrar: sale del token, nunca se guarda en nuestra base. */
+  user: AuthUser | null;
+  /** Nombre para mostrar: es el alias, sale del token y nunca se guarda en nuestra base. */
   displayName: string | null;
-  /** Lleva al jugador a Keycloak. Al volver, la app lo regresa a `returnTo`. */
-  login: (returnTo?: string) => Promise<void>;
+  /** El cliente del servicio de identidad, para lo que no es sesion (registro, verificar email, recuperar clave). */
+  client: AuthClient;
+  /** Entra con alias o email y contraseña. Lanza `AuthError` si no se puede. */
+  signIn: (login: string, password: string) => Promise<void>;
+  /** Cambia el codigo que dejo el login con Google por una sesion. */
+  signInWithCode: (code: string) => Promise<void>;
   logout: () => Promise<void>;
   /** Token vigente o null. Lo usan el cliente HTTP y SignalR en cada llamada, asi siempre es el mas reciente. */
   getAccessToken: () => Promise<string | null>;
-  /** Completa el regreso de Keycloak (`/auth/callback`). Se ejecuta una sola vez aunque React monte dos veces. */
-  completeLogin: () => Promise<string>;
+  /** El servidor dijo que la sesion no vale (401): se cierra y la pantalla de entrada vuelve sola, en la misma pagina. */
+  expire: () => void;
 }
 
 const AuthContext = createContext<AuthApi | null>(null);
 
-export function AuthProvider({ manager, children }: { manager: OidcManager; children: ReactNode }) {
-  const [user, setUser] = useState<User | null>(null);
+export function AuthProvider({ client, children }: { client: AuthClient; children: ReactNode }) {
+  const [user, setUser] = useState<AuthUser | null>(null);
   const [status, setStatus] = useState<AuthStatus>("loading");
-  const callback = useRef<Promise<string> | null>(null);
 
   useEffect(() => {
     let active = true;
-    const onLoaded = (loaded: User) => {
+    const onLoaded = (loaded: AuthUser) => {
       if (!active) return;
       setUser(loaded);
       setStatus("authenticated");
@@ -38,9 +40,9 @@ export function AuthProvider({ manager, children }: { manager: OidcManager; chil
       setStatus("anonymous");
     };
 
-    manager.events.addUserLoaded(onLoaded);
-    manager.events.addUserUnloaded(onUnloaded);
-    manager
+    client.events.addUserLoaded(onLoaded);
+    client.events.addUserUnloaded(onUnloaded);
+    client
       .getUser()
       .then((existing) => {
         if (!active) return;
@@ -51,44 +53,20 @@ export function AuthProvider({ manager, children }: { manager: OidcManager; chil
 
     return () => {
       active = false;
-      manager.events.removeUserLoaded(onLoaded);
-      manager.events.removeUserUnloaded(onUnloaded);
+      client.events.removeUserLoaded(onLoaded);
+      client.events.removeUserUnloaded(onUnloaded);
     };
-  }, [manager]);
+  }, [client]);
 
-  const login = useCallback(
-    (returnTo = window.location.pathname + window.location.search) => manager.signinRedirect({ state: { returnTo } }),
-    [manager],
-  );
-
-  const logout = useCallback(() => manager.signoutRedirect(), [manager]);
-
-  const getAccessToken = useCallback(async () => {
-    const current = await manager.getUser();
-    return current && !current.expired ? current.access_token : null;
-  }, [manager]);
-
-  const completeLogin = useCallback(() => {
-    // El codigo de autorizacion se puede canjear una sola vez: React en desarrollo monta los efectos dos veces,
-    // asi que la promesa se comparte para no canjearlo de nuevo (daria "No matching state").
-    callback.current ??= manager.signinRedirectCallback().then((signedIn) => {
-      const state = signedIn.state as { returnTo?: string } | undefined;
-      return state?.returnTo ?? "/";
-    });
-    return callback.current;
-  }, [manager]);
+  const signIn = useCallback(async (login: string, password: string) => void (await client.signIn(login, password)), [client]);
+  const signInWithCode = useCallback(async (code: string) => void (await client.signInWithCode(code)), [client]);
+  const logout = useCallback(() => client.signOut(), [client]);
+  const expire = useCallback(() => void client.signOut(), [client]);
+  const getAccessToken = useCallback(() => client.getAccessToken(), [client]);
 
   const value = useMemo<AuthApi>(
-    () => ({
-      status,
-      user,
-      displayName: (user?.profile.preferred_username as string | undefined) ?? user?.profile.name ?? null,
-      login,
-      logout,
-      getAccessToken,
-      completeLogin,
-    }),
-    [status, user, login, logout, getAccessToken, completeLogin],
+    () => ({ status, user, displayName: user?.profile.preferred_username ?? null, client, signIn, signInWithCode, logout, getAccessToken, expire }),
+    [status, user, client, signIn, signInWithCode, logout, getAccessToken, expire],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

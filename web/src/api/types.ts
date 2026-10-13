@@ -1,5 +1,14 @@
 // Contratos de la API (JSON en camelCase). Las fichas son siempre enteros: nunca decimales.
 
+/** Una cuenta vista desde el administrador de roles: alias y roles (nunca el email). */
+export interface IdentityUser {
+  id: string;
+  alias: string;
+  roles: string[];
+  emailConfirmed: boolean;
+  createdAt: string;
+}
+
 /** Un jugador visto desde el panel de administracion: solo id y fecha de alta (no hay datos personales). */
 export interface UserSummary {
   userId: string;

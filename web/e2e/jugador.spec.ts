@@ -1,16 +1,14 @@
 import { expect, test, type Page } from "@playwright/test";
 
-// Usuarios de desarrollo del realm (src/Casino.AppHost/realms/casino-realm.json). SOLO desarrollo local.
+// Usuarios de desarrollo del servicio de identidad (DevUsers, en src/Modules/Identity). SOLO desarrollo local.
 const USER = process.env.E2E_USER ?? "jugador2";
 const PASSWORD = process.env.E2E_PASSWORD ?? "jugador2-dev";
 
 async function login(page: Page) {
   await page.goto("/");
-  await page.getByRole("button", { name: /Entrar o crear cuenta/ }).click();
-  // Pantalla de Keycloak (no es nuestra): las contraseñas nunca pasan por la aplicacion.
-  await page.locator("#username").fill(USER);
-  await page.locator("#password").fill(PASSWORD);
-  await page.locator("#kc-login").click();
+  await page.getByLabel("Alias o email").fill(USER);
+  await page.getByLabel("Contraseña").fill(PASSWORD);
+  await page.getByRole("button", { name: "Entrar", exact: true }).click();
   await expect(page.getByRole("heading", { name: new RegExp(`Hola, ${USER}`) })).toBeVisible();
 }
 
@@ -21,7 +19,7 @@ test.describe.configure({ mode: "serial" });
 test("sin sesion se ve la pantalla de entrada y no hay datos privados", async ({ page }) => {
   await page.goto("/");
 
-  await expect(page.getByRole("button", { name: /Entrar o crear cuenta/ })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Entrar", exact: true })).toBeVisible();
   await expect(page.getByTestId("balance-value")).toHaveCount(0);
 });
 
@@ -78,5 +76,5 @@ test("cerrar sesion devuelve a la pantalla de entrada", async ({ page }) => {
 
   await page.getByRole("button", { name: "Salir" }).click();
 
-  await expect(page.getByRole("button", { name: /Entrar o crear cuenta/ })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Entrar", exact: true })).toBeVisible();
 });

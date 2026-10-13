@@ -92,7 +92,7 @@ if (lanMode)
     // El navegador usa rutas relativas al propio origen; Vite (LAN_MODE) las reenvia a la API y a Keycloak.
     web.WithEnvironment("LAN_MODE", "true")
         .WithEnvironment("VITE_API_URL", "/api")
-        .WithEnvironment("VITE_OIDC_AUTHORITY", identityAuthority);
+        .WithEnvironment("VITE_IDENTITY_URL", identityAuthority);
 }
 
 builder.Build().Run();
