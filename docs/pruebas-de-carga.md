@@ -31,19 +31,18 @@ k6 run -e PLAYERS=20 -e VUS=20 -e RAMP=10s -e DURATION=60s -e POLL_MS=50 -e LABE
 | `MAX_STAKE` | 5 | Fichas maximas por apuesta |
 | `TOPUP` | 20000 | Fichas que el backoffice le carga a cada jugador antes de empezar |
 | `POLL_MS` | 100 | Cada cuanto se consulta si cerro la ronda (la medicion de cobro tiene esa resolucion: usar 50 para afinar) |
-| `BASE_URL` / `KC_URL` | `http://localhost:5188` / `http://localhost:8080` | Donde estan la API (o el gateway) y Keycloak |
+| `BASE_URL` / `IDENTITY_URL` | `http://localhost:5188` / `http://localhost:8080` | Donde estan la API (o el gateway) y el servicio de identidad |
 | `LABEL` / `COMMIT` | `prueba` / `desconocido` | Se imprimen y van al archivo de resultados |
-| `KC_ADMIN_PASSWORD` | vacio | **Opcional.** Con la clave del administrador de Keycloak se crean los jugadores sinteticos `load-001..N` (datos inventados). Sin ella se usan `jugador1` y `jugador2` |
+| `LOAD_USERS` | vacio | **Opcional.** Con `true` se usan los jugadores sinteticos `load-001..N` (datos inventados); el AppHost se levanta con `Identity:SeedLoadUsers=N` para que el servicio de identidad los siembre. Sin ella se usan `jugador1` y `jugador2` |
 
-La clave del administrador es un secreto: se pasa por variable de entorno en el momento (por ejemplo, tomandola de los user-secrets del
-AppHost) y **nunca se escribe en el repositorio**. Los resultados crudos van a `tests/load/results/` (ignorados por git).
+Los jugadores sinteticos solo se siembran en `Development` y su contrasena (`LOAD_PASSWORD`, por defecto `load-dev-only`) es solo local: **nunca se escriben claves reales en el repositorio**. Los resultados crudos van a `tests/load/results/` (ignorados por git).
 
-El script usa el cliente `casino-tests` del realm (login con usuario y contrasena, **solo desarrollo**) y el usuario `backoffice1` para
+El script usa el cliente `casino-web` del servicio de identidad (login con usuario y contrasena, **solo desarrollo**) y el usuario `backoffice1` para
 cargar fichas. Todo es local: no apuntar esto a un ambiente real.
 
 ## Como leer los numeros
 - Mirar **mediana (med), p95 y p99**: el promedio esconde los casos lentos. p95 = el 95 % de las apuestas tardo eso o menos.
-- **Hay ruido.** Todo corre en una misma maquina (k6, Docker, Keycloak, la API, el antivirus, otras compilaciones). Dos corridas iguales
+- **Hay ruido.** Todo corre en una misma maquina (k6, Docker, el servicio de identidad, la API, el antivirus, otras compilaciones). Dos corridas iguales
   pueden diferir mucho. Para comparar, repetir cada escenario **al menos 3 veces** con la maquina quieta y comparar las medianas de las corridas.
 - Las peticiones "fallidas" (~0,2 %) son los `404` de `GET /wallet/me` mientras se espera que se abra la cuenta de un jugador nuevo
   durante la preparacion; no son errores de la carga.

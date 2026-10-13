@@ -1,7 +1,7 @@
 import { check, sleep } from 'k6';
 import { Counter, Rate, Trend } from 'k6/metrics';
 import { account, credit, isFinal, me, movements, placeRoulette, placeSlots, rouletteRound, slotsSpin, uuid } from './lib/casino.js';
-import { ensureLoadUsers, login } from './lib/keycloak.js';
+import { loadUserNames, login } from './lib/identity.js';
 
 // Prueba de carga del casino: muchos jugadores apostando a la vez a la ruleta y a la tragamonedas.
 // Mide cuanto tarda la API en ACEPTAR una apuesta y cuanto tarda en quedar COBRADA de punta a punta
@@ -12,11 +12,9 @@ const env = (name, fallback) => (__ENV[name] !== undefined && __ENV[name] !== ''
 
 const cfg = {
   baseUrl: env('BASE_URL', 'http://localhost:5188'),
-  kcUrl: env('KC_URL', 'http://localhost:8080'),
-  realm: env('REALM', 'casino'),
-  kcAdminUser: env('KC_ADMIN_USER', 'admin'),
-  kcAdminPassword: env('KC_ADMIN_PASSWORD', ''), // opcional: con ella se crean jugadores load-001..N; sin ella se usan los de desarrollo
-  loadPassword: env('LOAD_PASSWORD', 'load-dev-only'), // contrasena de los jugadores sinteticos (solo local)
+  identityUrl: env('IDENTITY_URL', 'http://localhost:8080'),
+  loadUsers: env('LOAD_USERS', '') === 'true', // true: usar load-001..N (el AppHost se levanto con Identity:SeedLoadUsers=N); si no, los de desarrollo
+  loadPassword: env('LOAD_PASSWORD', 'load-dev-only'), // contrasena de los jugadores sinteticos (solo local; la misma que siembra el servicio de identidad)
   backofficeUser: env('BACKOFFICE_USER', 'backoffice1'),
   backofficePassword: env('BACKOFFICE_PASSWORD', 'backoffice1-dev'),
   players: Number(env('PLAYERS', '10')),
@@ -70,10 +68,10 @@ export const options = {
   },
 };
 
-/** Los jugadores de la prueba: sinteticos si hay clave de administrador, o los de desarrollo. */
+/** Los jugadores de la prueba: sinteticos si se pidio (LOAD_USERS=true), o los de desarrollo. */
 function playerCredentials() {
-  if (cfg.kcAdminPassword) {
-    return ensureLoadUsers(cfg, cfg.players).map((username) => ({ username, password: cfg.loadPassword }));
+  if (cfg.loadUsers) {
+    return loadUserNames(cfg.players).map((username) => ({ username, password: cfg.loadPassword }));
   }
   return DEV_PLAYERS.slice(0, Math.max(1, Math.min(cfg.players, DEV_PLAYERS.length)));
 }
@@ -229,6 +227,6 @@ export function handleSummary(data) {
   const stamp = new Date().toISOString().replace(/[:.]/g, '-');
   return {
     stdout: `${lines.join('\n')}\n`,
-    [`results/${cfg.label}-${stamp}.json`]: JSON.stringify({ label: cfg.label, commit: cfg.commit, config: { ...cfg, kcAdminPassword: undefined }, metrics: data.metrics }, null, 2),
+    [`results/${cfg.label}-${stamp}.json`]: JSON.stringify({ label: cfg.label, commit: cfg.commit, config: { ...cfg, loadPassword: undefined }, metrics: data.metrics }, null, 2),
   };
 }

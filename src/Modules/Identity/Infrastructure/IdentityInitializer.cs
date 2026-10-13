@@ -54,6 +54,10 @@ internal sealed class IdentityInitializer(IServiceProvider services, IOptions<Id
         if (environment.IsDevelopment() && configuration.GetValue<bool>("Identity:SeedDevUsers"))
         {
             await DevUsers.SeedAsync(scope.ServiceProvider, cancellationToken);
+            if (configuration.GetValue<int>("Identity:SeedLoadUsers") is > 0 and var loadUsers)
+            {
+                await DevUsers.SeedLoadUsersAsync(scope.ServiceProvider, loadUsers, configuration["Identity:SeedLoadPassword"] ?? "load-dev-only", cancellationToken);
+            }
         }
 
         // Los alias de IdentityLinksOptions.AdminAliases reciben el rol de backoffice (el primer administrador sale de la configuracion).

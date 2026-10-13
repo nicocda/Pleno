@@ -21,6 +21,40 @@ internal static class DevUsers
         ("cajero1", "cajero1-dev", [Roles.Player, Roles.Cashier]),
     ];
 
+    /// <summary>Jugadores sinteticos load-001..N para las pruebas de carga (<c>Identity:SeedLoadUsers</c>); datos inventados, con email del dominio reservado .invalid.</summary>
+    public static async Task SeedLoadUsersAsync(IServiceProvider services, int count, string password, CancellationToken ct)
+    {
+        var users = services.GetRequiredService<UserManager<PlayerUser>>();
+        var emails = services.GetRequiredService<EmailProtector>();
+        var clock = services.GetRequiredService<TimeProvider>();
+
+        for (var i = 1; i <= count; i++)
+        {
+            ct.ThrowIfCancellationRequested();
+            var alias = $"load-{i:D3}";
+            if (await users.FindByNameAsync(alias) is not null)
+            {
+                continue;
+            }
+
+            var email = $"{alias}@load.invalid";
+            var user = new PlayerUser
+            {
+                Id = Guid.CreateVersion7(),
+                UserName = alias,
+                EmailCipher = emails.Encrypt(email, out var version),
+                EmailKeyVersion = version,
+                EmailHash = emails.Hash(email),
+                EmailConfirmed = true,
+                CreatedAt = clock.GetUtcNow(),
+            };
+            if ((await users.CreateAsync(user, password)).Succeeded)
+            {
+                await users.AddToRoleAsync(user, Roles.Player);
+            }
+        }
+    }
+
     public static async Task SeedAsync(IServiceProvider services, CancellationToken ct)
     {
         var users = services.GetRequiredService<UserManager<PlayerUser>>();

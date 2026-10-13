@@ -14,7 +14,7 @@ Un saldo que nunca se pierde ni se duplica, con concurrencia, tiempo real, audit
 
 ## Stack
 
-.NET 10 · Aspire 13 · PostgreSQL + Marten · Redis · RabbitMQ (luego Azure Service Bus) · Wolverine · OpenTelemetry · React + PixiJS · Keycloak · xUnit + Testcontainers + k6.
+.NET 10 · Aspire 13 · PostgreSQL + Marten · Redis · RabbitMQ (luego Azure Service Bus) · Wolverine · OpenTelemetry · React + PixiJS · ASP.NET Core Identity + OpenIddict · xUnit + Testcontainers + k6.
 
 ## Fases
 

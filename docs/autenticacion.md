@@ -1,70 +1,83 @@
 # Autenticacion: como usarla en desarrollo
 
-Decision y motivos: [ADR 0003](adr/0003-identidad-con-keycloak.md).
+Decision y motivos: [ADR 0017](adr/0017-identidad-propia.md) (reemplaza al [ADR 0003](adr/0003-identidad-con-keycloak.md), Keycloak).
+
+## Como esta armada
+`Casino.IdentityService` (modulo `src/Modules/Identity`, base `identitydb`) es el unico dueño de las cuentas: **alias** (publico, unico), **email** (obligatorio, verificado, guardado **cifrado** y con un **HMAC** para buscarlo) y
+contraseña con hash. Emite tokens OpenID Connect (OpenIddict): el JWT lleva `sub`, `preferred_username` (el alias), `role` y `aud=casino-api`; **nunca el email**. Los demas servicios solo validan el JWT con las claves publicas
+(`/.well-known/openid-configuration` + JWKS). En local escucha en **http://localhost:8080** (el mismo puerto que usaba Keycloak).
 
 ## Levantar todo
-`aspire run` (o `aspire start`) levanta Postgres, Redis, RabbitMQ, **Keycloak** y la API. Keycloak queda en
-**http://localhost:8080** (consola de administracion: usuario `admin`; su clave es un secreto de usuario, ver abajo).
+`python scripts/dev-identity-secrets.py` (una vez) y despues `aspire run` (o `aspire start`): levanta Postgres, Redis, RabbitMQ, el servicio de identidad, la Wallet, los juegos, la API y el front.
 
 ## Secretos que necesita el entorno local
 Ninguno se versiona. Se guardan con user-secrets:
 
 | Secreto | Proyecto | Para que |
 | --- | --- | --- |
-| `Parameters:keycloak-admin-password` | `src/Casino.AppHost` | Clave del administrador de Keycloak |
+| `Parameters:identity-email-key` | `src/Casino.AppHost` | 32 bytes en base64: cifra los emails (AES-256-GCM). **Si se pierde, los emails guardados quedan ilegibles** |
+| `Parameters:identity-email-hmac-key` | `src/Casino.AppHost` | 32 bytes en base64, distinta a la anterior: hash con clave para buscar emails sin descifrar |
 | `Fairness:MasterKey` | `src/Casino.GamesService` | Clave maestra que cifra las server seeds (32 bytes en base64) |
+| `Parameters:google-client-id` / `google-client-secret` | `src/Casino.AppHost` | **Opcionales**: login con Google (ver abajo) |
+
+`python scripts/dev-identity-secrets.py` genera las dos primeras (sin pisarlas si ya existen). La de las seeds:
 
 ```
-dotnet user-secrets set "Parameters:keycloak-admin-password" "<valor>" --project src/Casino.AppHost
 dotnet user-secrets set "Fairness:MasterKey" "<32 bytes aleatorios en base64>" --project src/Casino.GamesService
 ```
 
-## Entrar con Google (opcional)
-El realm trae el proveedor **Google** ya definido pero apagado. Para encenderlo hace falta una app OAuth propia (las credenciales son secretos):
+En la nube o en un servidor: los mismos valores van en Key Vault o en un `.env` con permisos 600 (nunca versionado), mas `Identity:SigningKeyPem` (RSA en PEM, firma de los tokens), `Identity:TokenEncryptionKey` (32 bytes en base64,
+cifra los refresh tokens), `Identity:Issuer` (la URL publica del servicio), `Identity:PublicWebUrl` / `Identity:AllowedReturnOrigins` (donde vive el front) y `Email:Smtp:*` (host, puerto, usuario y clave del correo). En `Development`,
+si faltan las claves de firma y de cifrado de tokens, se generan en memoria (los tokens dejan de valer al reiniciar). Fuera de `Development` el servicio **no arranca** sin ellas ni sin SMTP.
 
+## Entrar con Google (opcional)
 1. En [Google Cloud Console](https://console.cloud.google.com/apis/credentials) crear una credencial **ID de cliente de OAuth** de tipo *Aplicacion web*.
-   Origen autorizado: `http://localhost:8080`. URI de redireccion autorizada: `http://localhost:8080/realms/casino/broker/google/endpoint`.
+   Origen autorizado: `http://localhost:8080`. URI de redireccion autorizada: `http://localhost:8080/signin-google` (en modo red local, `https://<ip>:5173/signin-google`).
 2. Guardar el ID y el secreto con user-secrets (nunca en el repositorio):
    ```
    dotnet user-secrets set "Parameters:google-client-id" "<id>" --project src/Casino.AppHost
    dotnet user-secrets set "Parameters:google-client-secret" "<secreto>" --project src/Casino.AppHost
    ```
-3. Reiniciar con `aspire run`: la pantalla de login muestra **Google** junto al usuario y la contraseña. Quien entra con Google recibe el rol `player` igual que
-   quien se registra, y la API ve el mismo token de siempre (la identidad sigue saliendo del token).
+3. Reiniciar con `aspire run`: la pantalla de entrada muestra **Entrar con Google**. Flujo: el front va a `/identity/google/start` → Google → `/signin-google` → el servicio vuelve al front con un **codigo de un solo uso**
+   (2 minutos) que el front cambia por tokens en `/connect/token` (`grant_type=urn:casino:grant_type:external_code`). Los tokens no viajan por la URL y solo se vuelve a origenes de `Identity:AllowedReturnOrigins`.
 
-Sin esas credenciales el boton no aparece. En la nube las mismas dos credenciales van en Key Vault.
+Sin esas credenciales el boton no aparece (`GET /identity/providers` dice `google: false`). En la nube las mismas dos credenciales van en Key Vault.
 
-> **Realm ya importado:** Keycloak solo importa el realm la primera vez. Si tu entorno local ya existia, borra el volumen `keycloak-data` (se pierden los usuarios de
-> prueba creados a mano) o cargalo en la consola: *Identity providers > Google* con el ID y el secreto.
+> **Cuentas repetidas:** si el email de Google ya tiene una cuenta con contraseña **verificada**, el login de Google se vincula a esa misma cuenta (conserva alias y roles). Si la cuenta **no estaba verificada**, pasa a ser de quien demostro tener el email
+> y **pierde la contraseña** (defensa contra el alta previa con el email de otra persona). Las cuentas nuevas por Google reciben un alias generado (`jugador_xxxxxx`); no se guarda el nombre de Google. El email es PII: va cifrado y se enmascara en logs.
 
-> **Cuentas repetidas:** si alguien ya se registro con usuario y contraseña y entra con Google con el mismo email, Keycloak le pide confirmar que es suya
-> (flujo *first broker login*) en vez de crear otro jugador o dejarle tomar la cuenta. El email de Google es PII: se enmascara en logs como cualquier otro.
+## Registro, verificacion y recuperacion
+- **Registro:** `POST /identity/register` `{alias, email, password}`. Alias de 3 a 20 caracteres (letras, numeros, `.`, `-`, `_`), contraseña de 10 o mas. Responde 201 **tambien si el email ya tenia cuenta** (no se revela quien esta registrado; el dueño recibe un aviso).
+- **Verificar el email:** el correo trae un enlace `/verificar?token=...` (vale 24 h, un solo uso). **Sin verificar no se entra** (`error_description=email_not_verified`). `POST /identity/verify-email`, `POST /identity/resend-verification`.
+- **Recuperar la clave:** `POST /identity/forgot-password` (siempre 202) manda `/recuperar?token=...` (vale 1 h, un solo uso); `POST /identity/reset-password` cambia la clave, verifica el email, levanta el bloqueo y **cierra las demas sesiones**.
+- **Defensas:** bloqueo de la cuenta tras 5 intentos fallidos (15 minutos) y limite de peticiones por IP en estos endpoints y en el login.
+- **En desarrollo** el correo no sale: sin `Email:Smtp:Host` los mensajes se escriben en el log del servicio de identidad (asunto y cuerpo, nunca el destinatario) para seguir los enlaces a mano.
 
-## Usuarios de desarrollo del realm `casino`
-**Solo para desarrollo local.** Las contraseñas son triviales a proposito y el repositorio es publico: no las reutilices en ningun lado.
+## Usuarios de desarrollo
+**Solo para desarrollo local.** Los siembra el servicio de identidad al arrancar, unicamente en `Development` y con `Identity:SeedDevUsers=true` (lo pone el AppHost). Las contraseñas son triviales a proposito y el repositorio es publico: no las reutilices en ningun lado.
+Tienen los mismos ids, alias y claves que tenia el realm de Keycloak. Cada uno tiene el email `<alias>@casino.test` (verificado).
 
 | Usuario | Contraseña | Rol |
 | --- | --- | --- |
 | `jugador1` | `jugador1-dev` | player |
 | `jugador2` | `jugador2-dev` | player |
-| `backoffice1` | `backoffice1-dev` | backoffice |
+| `backoffice1` | `backoffice1-dev` | player + backoffice (administrador) |
 | `jefe1` | `jefe1-dev` | player + head_cashier (jefe de cajeros) |
 | `cajero1` | `cajero1-dev` | player + cashier (cajero) |
 
-Cualquiera puede ademas registrarse desde la pantalla de login (registro habilitado) y recibe el rol `player`.
+Cualquiera puede ademas crear una cuenta desde la pantalla de entrada y recibe el rol `player`. Para pruebas de carga, `Identity:SeedLoadUsers=N` siembra `load-001..N` (ver [pruebas-de-carga.md](pruebas-de-carga.md)).
 
 ## Como lo usa el front (React)
-- Flujo **Authorization Code con PKCE**, cliente publico `casino-web` (redirecciones permitidas: `http://localhost:5173/*`).
-- Autoridad (issuer): `http://localhost:8080/realms/casino`.
-- Cada llamada a la API lleva `Authorization: Bearer <access_token>`. Tras el login, llamar a `GET /me`: da de alta al jugador y
-  devuelve su `userId`, su nombre y sus roles.
+- Cliente propio (`web/src/auth/identity.ts`): entra con **alias o email + contraseña** (`grant_type=password` del cliente publico `casino-web`, sin secreto) y renueva con `refresh_token` (con rotacion). El access token dura 10 minutos; el refresh, 14 dias.
+- La sesion vive en `sessionStorage` (se pierde al cerrar la pestaña). Un 401 de la API cierra la sesion y vuelve la pantalla de entrada. Anotado en `docs/mejoras.md`: pasar el refresh a una cookie `HttpOnly`.
+- Autoridad (issuer): `http://localhost:8080`. Tras el login, llamar a `GET /me`: da de alta al jugador y devuelve su `userId`, su alias y sus roles.
 
 ## Probar la API a mano
-Con el cliente de pruebas `casino-tests` (solo desarrollo) se pide un token con usuario y contraseña:
+Se pide un token con el mismo cliente que usa el front (alias o email + contraseña):
 
 ```
-curl -s -d "grant_type=password" -d "client_id=casino-tests" -d "username=jugador1" -d "password=jugador1-dev" \
-  http://localhost:8080/realms/casino/protocol/openid-connect/token
+curl -s -d "grant_type=password" -d "client_id=casino-web" -d "username=jugador1" -d "password=jugador1-dev" \
+  http://localhost:8080/connect/token
 ```
 
 Luego `curl -H "Authorization: Bearer <access_token>" http://localhost:5188/me`.
@@ -78,6 +91,7 @@ Luego `curl -H "Authorization: Bearer <access_token>" http://localhost:5188/me`.
 | `POST /games/roulette/bets` (`Idempotency-Key`) | player | Apostar; el servidor asigna el nonce |
 | `GET /games/roulette/rounds`, `GET /games/roulette/rounds/{id}` | player | Mi historial y una ronda propia |
 | `GET /backoffice/users` | backoffice | Jugadores registrados (id y fecha de alta) para el panel `/admin` |
+| `GET /identity/admin/users?q=`, `PUT /identity/admin/users/{id}/roles` | backoffice | **Servicio de identidad** (no el gateway): cuentas por alias (nunca el email) y sus roles; al cambiar roles se cierran las sesiones de esa cuenta |
 | `GET /backoffice/wallet/users/{id}`, `.../balance`, `POST .../credit` | backoffice | Consulta y ajuste manual (cada carga queda en la auditoria) |
 | `GET /wallet/me/movements?limit=&before=` | player | Mi extracto: cada cambio de fichas disponibles con el saldo resultante (paginado por cursor) |
 | `GET /backoffice/wallet/credits?limit=&before=&userId=&from=&to=` | backoffice | Historial general de cargas con filtros, paginado y total de fichas del filtro |
@@ -89,8 +103,8 @@ Luego `curl -H "Authorization: Bearer <access_token>" http://localhost:5188/me`.
 
 ## Cajeros y jefes de cajeros
 Dos roles mas ([ADR 0014](adr/0014-cajeros-jerarquia-y-cobros.md)): **`cashier`** (cajero) y **`head_cashier`** (jefe de cajeros). Los dos conservan `player` (tienen su cuenta de fichas).
-- **Los roles de Keycloak dan acceso a los endpoints; el arbol decide a quien se le puede cargar.** El arbol lo arma el backoffice en `/admin/jerarquia`
-  (`PUT /backoffice/wallet/hierarchy/{id}`): el jefe no tiene padre, el padre de un cajero es un jefe y el de un jugador es un cajero. Hay que dar **las dos cosas**: el rol en Keycloak y el lugar en el arbol;
+- **Los roles de la cuenta dan acceso a los endpoints; el arbol decide a quien se le puede cargar.** El arbol lo arma el backoffice en `/admin/jerarquia`
+  (`PUT /backoffice/wallet/hierarchy/{id}`): el jefe no tiene padre, el padre de un cajero es un jefe y el de un jugador es un cajero. Hay que dar **las dos cosas**: el rol (en `/admin/roles`) y el lugar en el arbol;
   el nivel del arbol tiene que coincidir con el rol.
 - **Las fichas salen del saldo de quien carga** (transferencia, nunca emision). El backoffice le acredita fichas al jefe (`/backoffice/wallet/users/{id}/credit`); el jefe se las carga a sus cajeros y estos a sus jugadores.
   El jefe solo puede cargar a **sus cajeros** y el cajero solo a **sus jugadores**; cualquier otro destino responde 403.
@@ -99,18 +113,17 @@ Dos roles mas ([ADR 0014](adr/0014-cajeros-jerarquia-y-cobros.md)): **`cashier`*
   Se configura sin recompilar en la seccion `Cashiers` (`CashierCommissionPermille`, `HeadCashierCommissionPermille`, `MaxCommissionPerLoad`, `MaxCommissionPerDay`). Es hacia abajo (entera) y una carga muy chica puede no pagar nada.
   El jugador recibe **todo** lo cargado; la comision es aparte y aparece en el extracto del cajero como "Comision por cargas". El backoffice ve lo emitido en `GET /backoffice/wallet/commissions`.
 - **Nombres:** el cajero ve el **nombre de usuario** (`preferred_username`) de **su** gente para distinguirla, y de nadie mas. El nombre se guarda solo de quienes estan en el arbol (en su nodo) y se renueva cuando esa persona usa la API; hasta entonces
-  se ve el id abreviado. Una carga a alguien que ya no esta a cargo del cajero deja de mostrar su nombre. Es dato personal: no va a logs, trazas ni metricas. Ojo: con el login de Google el nombre de usuario puede ser el email.
+  se ve el id abreviado. Una carga a alguien que ya no esta a cargo del cajero deja de mostrar su nombre. Es el alias (publico): no es el email, que nunca sale del servicio de identidad. De todos modos no va a logs, trazas ni metricas.
 - Cada carga queda en la auditoria (`ChipsTransferred`: quien, a quien, cuanto, cuando; solo ids) y en el extracto de los dos como "Fichas recibidas" / "Fichas enviadas".
 - **Retiros:** cualquier jugador, desde `/retirar`, pide retirar fichas (minimo 10): quedan **apartadas** hasta que su cajero las cobra (pasan a la cuenta del cajero), las rechaza, el jugador cancela o vence el plazo (72 h) y vuelven. Un jugador sin cajero
   o un jefe de cajeros lo atiende el backoffice en `/admin/retiros` (al cobrar, las fichas vuelven a la casa). Endpoints: `POST|GET /wallet/withdrawals`, `POST /wallet/withdrawals/{id}/cancel`, `GET /cashier/withdrawals`, `POST /cashier/withdrawals/{id}/pay|reject`,
   `GET /backoffice/wallet/withdrawals`, `POST /backoffice/wallet/withdrawals/{id}/pay|reject`. En el extracto aparecen como "Retiro solicitado" y "Retiro devuelto".
 - **Entorno local ya levantado:** `python scripts/dev-jerarquia.py` ubica a `jefe1` → `cajero1` → `jugador1`/`jugador2` en el arbol y le acredita fichas al jefe (solo desarrollo; reinicia la app antes si es de una version anterior).
-- Para dar el rol a un usuario que ya existe: consola de Keycloak (Users > usuario > Role mapping > `cashier` o `head_cashier`).
+- Para dar el rol a una cuenta que ya existe: `/admin/roles` (o `PUT /identity/admin/users/{id}/roles`).
 
 ## Panel de administracion (`/admin`)
 El rol `backoffice` es el de administrador: ve el enlace **Admin** en el menu y puede cargar fichas a cualquier jugador (cada carga lleva
-`Idempotency-Key`). Como Keycloak solo importa el realm la primera vez, para dar el rol a un usuario que ya existe se asigna en la consola
-de Keycloak (Users > usuario > Role mapping > `backoffice`) o con la API de administracion. El usuario conserva `player`, asi que puede seguir jugando.
+`Idempotency-Key`). El rol se da en `/admin/roles` (o con `PUT /identity/admin/users/{id}/roles`); el primer administrador sale de la configuracion `Identity:AdminAliases` (el AppHost la deja en `backoffice1`). El usuario conserva `player`, asi que puede seguir jugando.
 
 ### Auditoria de las cargas
 Cada carga manual guarda una anotacion (`AuditEntry`, esquema de la Wallet): administrador, jugador, monto, `Idempotency-Key`, id de la
