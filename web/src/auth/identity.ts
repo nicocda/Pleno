@@ -162,9 +162,9 @@ export function createAuthClient(options: AuthClientOptions = {}): AuthClient {
 
   async function refresh(): Promise<AuthUser | null> {
     refreshing ??= (async () => {
-      const session = read();
-      if (!session?.refresh_token) return null;
       try {
+        const session = read();
+        if (!session?.refresh_token) return null;
         const { response, body } = await postToken({ grant_type: "refresh_token", refresh_token: session.refresh_token });
         if (response.ok) return accept(body as never);
         clear(); // el servidor lo rechazo: la sesion ya no vale
@@ -174,6 +174,7 @@ export function createAuthClient(options: AuthClientOptions = {}): AuthClient {
         timer = setTimeout(() => void refresh(), RETRY_AFTER_ERROR_MS);
         return null;
       } finally {
+        // Siempre se libera, tambien cuando no habia sesion que renovar: si no, una renovacion posterior devolveria este resultado viejo.
         refreshing = null;
       }
     })();

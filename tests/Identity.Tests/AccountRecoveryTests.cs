@@ -144,4 +144,24 @@ public sealed class AccountRecoveryTests(IdentityServiceFixture fixture) : IClas
         Assert.True(purged >= 1);
         Assert.Equal(1, await db.OneTimeTokens.CountAsync(t => t.UserId == user));
     }
+
+    [Fact]
+    public async Task Pedidos_simultaneos_mandan_un_solo_correo()
+    {
+        var client = Client();
+        await RegisterAsync(client, "quique_rec", "quique.rec@example.com", Password);
+        var before = fixture.Emails.Sent.Count(m => m.To == "quique.rec@example.com");
+
+        await Task.WhenAll(Enumerable.Range(0, 8).Select(_ => client.PostAsJsonAsync("/identity/resend-verification", new { email = "quique.rec@example.com" })));
+
+        Assert.Equal(before + 1, fixture.Emails.Sent.Count(m => m.To == "quique.rec@example.com"));
+    }
+
+    [Fact]
+    public async Task Recuperar_con_la_clave_nula_responde_400_y_no_falla()
+    {
+        var response = await Client().PostAsJsonAsync("/identity/reset-password", new { token = "x", newPassword = (string?)null });
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+    }
 }

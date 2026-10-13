@@ -49,9 +49,10 @@ internal static class TokenEndpoint
                 return Invalid("Usuario o clave incorrectos.");
             }
 
+            // Una cuenta bloqueada responde igual que una clave incorrecta: no se revela que existe ni que esta bloqueada.
             if (await users.IsLockedOutAsync(user))
             {
-                return Invalid("Cuenta bloqueada temporalmente por intentos fallidos.");
+                return Invalid("Usuario o clave incorrectos.");
             }
 
             if (!await users.CheckPasswordAsync(user, request.Password))

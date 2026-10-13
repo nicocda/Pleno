@@ -53,21 +53,28 @@ public sealed class OneTimeTokenService(IdentityDb db, TimeProvider clock)
     public async Task<bool> TryClaimSlotAsync(Guid userId, string kind, TimeSpan window, CancellationToken ct)
     {
         var now = clock.GetUtcNow();
-        if (await db.Set<OneTimeToken>().AnyAsync(t => t.UserId == userId && t.Purpose == kind && t.ExpiresAt > now, ct))
-        {
-            return false;
-        }
-
-        db.Set<OneTimeToken>().Add(new OneTimeToken
+        // El hash de la marca es fijo para esa cuenta, ese tipo y esa ventana de tiempo: el indice unico hace atomico el "uno por ventana"
+        // (dos pedidos simultaneos no pueden insertar los dos).
+        var bucket = now.ToUnixTimeSeconds() / Math.Max(1, (long)window.TotalSeconds);
+        var mark = new OneTimeToken
         {
             Id = Guid.CreateVersion7(),
             UserId = userId,
             Purpose = kind,
-            TokenHash = Hash(Guid.NewGuid().ToString("N")),
+            TokenHash = Hash($"{userId:N}:{kind}:{bucket}"),
             ExpiresAt = now.Add(window),
-        });
-        await db.SaveChangesAsync(ct);
-        return true;
+        };
+        db.Set<OneTimeToken>().Add(mark);
+        try
+        {
+            await db.SaveChangesAsync(ct);
+            return true;
+        }
+        catch (DbUpdateException)
+        {
+            db.Entry(mark).State = EntityState.Detached;
+            return false;
+        }
     }
 
     /// <summary>Borra los tokens y marcas vencidos hace mas de un dia (los usados tambien), para que la tabla no crezca sin limite.</summary>

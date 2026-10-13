@@ -107,6 +107,19 @@ describe("createAuthClient", () => {
     expect(calls.filter((c) => form(c.init).grant_type === "refresh_token")).toHaveLength(1);
   });
 
+  it("renews again after an earlier refresh found no session (the shared promise is released)", async () => {
+    const clock = { now: 1_000 };
+    let n = 0;
+    const { client, calls } = setup(() => json(200, { access_token: TOKEN, refresh_token: `r${++n}`, expires_in: 600 }), clock);
+
+    expect(await client.getUser()).toBeNull(); // sin sesion: no hay nada que renovar
+    await client.signIn("jugador1", "x");
+    clock.now += 590;
+    await client.getAccessToken();
+
+    expect(calls.filter((c) => form(c.init).grant_type === "refresh_token")).toHaveLength(1);
+  });
+
   it("closes the session when the server rejects the refresh token", async () => {
     const clock = { now: 1_000 };
     let n = 0;

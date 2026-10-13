@@ -104,8 +104,11 @@ public sealed class IdentityFlowTests(IdentityServiceFixture fixture) : IClassFi
             Assert.Equal(HttpStatusCode.BadRequest, bad.StatusCode);
         }
 
-        var (blocked, _) = await PasswordLoginAsync(client, "fede_flow", Password);
+        var (blocked, blockedBody) = await PasswordLoginAsync(client, "fede_flow", Password);
         Assert.Equal(HttpStatusCode.BadRequest, blocked.StatusCode);
+        // Una cuenta bloqueada responde igual que una clave incorrecta (no se revela que existe).
+        var (_, unknownBody) = await PasswordLoginAsync(client, "no_existe_flow", Password);
+        Assert.Equal(unknownBody.GetProperty("error_description").GetString(), blockedBody.GetProperty("error_description").GetString());
     }
 
     [Fact]
