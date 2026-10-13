@@ -14,7 +14,7 @@ public sealed class IdentityFlowTests(IdentityServiceFixture fixture) : IClassFi
     public async Task Registrar_y_entrar_con_el_alias_da_un_jwt_sin_email()
     {
         var client = Client();
-        Assert.Equal(HttpStatusCode.Created, (await RegisterAsync(client, "ana_flow", "ana.flow@example.com", Password)).StatusCode);
+        await fixture.RegisterConfirmedAsync(client, "ana_flow", "ana.flow@example.com", Password);
 
         var (response, body) = await PasswordLoginAsync(client, "ana_flow", Password);
 
@@ -33,7 +33,7 @@ public sealed class IdentityFlowTests(IdentityServiceFixture fixture) : IClassFi
     public async Task Se_puede_entrar_con_el_email_en_vez_del_alias()
     {
         var client = Client();
-        await RegisterAsync(client, "beto_flow", "Beto.Flow@Example.com", Password);
+        await fixture.RegisterConfirmedAsync(client, "beto_flow", "beto.flow@example.com", Password);
 
         var (response, body) = await PasswordLoginAsync(client, "  beto.flow@example.com ", Password);
 
@@ -96,7 +96,7 @@ public sealed class IdentityFlowTests(IdentityServiceFixture fixture) : IClassFi
     public async Task Clave_incorrecta_no_entra_y_tras_cinco_fallos_se_bloquea_la_cuenta()
     {
         var client = Client();
-        await RegisterAsync(client, "fede_flow", "fede.flow@example.com", Password);
+        await fixture.RegisterConfirmedAsync(client, "fede_flow", "fede.flow@example.com", Password);
 
         for (var i = 0; i < 5; i++)
         {
@@ -112,7 +112,7 @@ public sealed class IdentityFlowTests(IdentityServiceFixture fixture) : IClassFi
     public async Task El_refresh_token_da_un_access_token_nuevo()
     {
         var client = Client();
-        await RegisterAsync(client, "gabi_flow", "gabi.flow@example.com", Password);
+        await fixture.RegisterConfirmedAsync(client, "gabi_flow", "gabi.flow@example.com", Password);
         var (_, login) = await PasswordLoginAsync(client, "gabi_flow", Password);
 
         var (response, refreshed) = await RefreshAsync(client, login.GetProperty("refresh_token").GetString()!);

@@ -20,6 +20,8 @@ namespace Casino.Modules.Identity.Api;
 /// </summary>
 internal static class TokenEndpoint
 {
+    public const string ExternalCodeGrant = "urn:casino:grant_type:external_code";
+
     public static void Map(IEndpointRouteBuilder app) =>
         app.MapPost("/connect/token", HandleAsync)
             .RequireRateLimiting(IdentityModule.RateLimitPolicy)
@@ -27,7 +29,7 @@ internal static class TokenEndpoint
             .WithTags("Identity")
             .ExcludeFromDescription();
 
-    private static async Task<IResult> HandleAsync(HttpContext http, AccountService accounts, UserManager<PlayerUser> users, CancellationToken ct)
+    private static async Task<IResult> HandleAsync(HttpContext http, AccountService accounts, UserManager<PlayerUser> users, OneTimeTokenService oneTimeTokens, CancellationToken ct)
     {
         var request = http.GetOpenIddictServerRequest() ?? throw new InvalidOperationException("No se pudo leer la peticion OpenID Connect.");
 
@@ -50,7 +52,28 @@ internal static class TokenEndpoint
                 return Invalid("Usuario o clave incorrectos.");
             }
 
+            // Despues de comprobar la clave (no se revela si la cuenta existe): sin email verificado no se entra.
+            if (!user.EmailConfirmed)
+            {
+                return Invalid("email_not_verified");
+            }
+
             await users.ResetAccessFailedCountAsync(user);
+            return await SignInAsync(user, users, request.GetScopes());
+        }
+
+        if (request.GrantType == ExternalCodeGrant)
+        {
+            // Codigo de un solo uso que dejo el login con Google (ver ExternalLoginEndpoints).
+            var code = request.GetParameter("code")?.ToString();
+            var user = await oneTimeTokens.ConsumeAsync(code, OneTimeTokenPurpose.ExternalLogin, ct) is { } userId
+                ? await users.FindByIdAsync(userId.ToString())
+                : null;
+            if (user is null || await users.IsLockedOutAsync(user))
+            {
+                return Invalid("Codigo invalido o vencido.");
+            }
+
             return await SignInAsync(user, users, request.GetScopes());
         }
 

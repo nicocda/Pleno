@@ -3,6 +3,8 @@ using System.Threading.RateLimiting;
 using Casino.Modules.Identity.Application;
 using Casino.Modules.Identity.Domain;
 using Casino.Modules.Identity.Infrastructure;
+using Microsoft.AspNetCore.Authentication;
+using Microsoft.AspNetCore.Authentication.Google;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Identity;
@@ -15,6 +17,7 @@ using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Hosting;
 using Microsoft.IdentityModel.Tokens;
 using OpenIddict.Abstractions;
+using OpenIddict.Validation.AspNetCore;
 
 namespace Casino.Modules.Identity.Api;
 
@@ -57,7 +60,13 @@ public static class IdentityModule
             .AddEntityFrameworkStores<IdentityDb>()
             .AddDefaultTokenProviders();
         services.AddScoped<AccountService>();
+        services.AddScoped<AccountFlows>();
+        services.AddScoped<OneTimeTokenService>();
+        services.AddOptions<IdentityLinksOptions>().Bind(builder.Configuration.GetSection(IdentityLinksOptions.SectionName));
+        services.AddOptions<EmailOptions>().Bind(builder.Configuration.GetSection(EmailOptions.SectionName));
+        AddEmailSender(builder);
         services.AddAuthorization();
+        AddAuthentication(builder);
 
         var permitLimit = builder.Configuration.GetValue("Identity:RateLimitPerMinute", 20);
         services.AddRateLimiter(limiter =>
@@ -73,7 +82,7 @@ public static class IdentityModule
             .AddServer(server =>
             {
                 server.SetTokenEndpointUris("/connect/token");
-                server.AllowPasswordFlow().AllowRefreshTokenFlow();
+                server.AllowPasswordFlow().AllowRefreshTokenFlow().AllowCustomFlow(TokenEndpoint.ExternalCodeGrant);
                 server.SetAccessTokenLifetime(TimeSpan.FromMinutes(10));
                 server.SetRefreshTokenLifetime(TimeSpan.FromDays(14));
                 server.RegisterScopes(OpenIddictConstants.Scopes.OfflineAccess);
@@ -100,7 +109,51 @@ public static class IdentityModule
         ArgumentNullException.ThrowIfNull(app);
         AccountEndpoints.Map(app);
         TokenEndpoint.Map(app);
+        ExternalLoginEndpoints.Map(app);
+        AdminEndpoints.Map(app);
         return app;
+    }
+
+    private static void AddEmailSender(WebApplicationBuilder builder)
+    {
+        if (!string.IsNullOrWhiteSpace(builder.Configuration["Email:Smtp:Host"]))
+        {
+            builder.Services.AddSingleton<IEmailSender, SmtpEmailSender>();
+        }
+        else if (builder.Environment.IsDevelopment())
+        {
+            builder.Services.AddSingleton<IEmailSender, LogEmailSender>();
+        }
+        else
+        {
+            throw new InvalidOperationException("Falta 'Email:Smtp:Host' (y sus credenciales, que son secretos): sin envio de correo no hay verificacion ni recuperacion de cuenta.");
+        }
+    }
+
+    /// <summary>Los tokens propios se validan con OpenIddict; el login con Google (opcional) usa una cookie externa de paso.</summary>
+    private static void AddAuthentication(WebApplicationBuilder builder)
+    {
+        var auth = builder.Services.AddAuthentication(OpenIddictValidationAspNetCoreDefaults.AuthenticationScheme);
+        auth.AddCookie(ExternalLoginEndpoints.ExternalScheme, cookie =>
+        {
+            cookie.Cookie.Name = "casino.external";
+            cookie.ExpireTimeSpan = TimeSpan.FromMinutes(5);
+            cookie.Cookie.SecurePolicy = CookieSecurePolicy.SameAsRequest;
+        });
+
+        // Las credenciales de la app OAuth de Google son secretos (user-secrets / Key Vault). Sin ellas no hay boton de Google.
+        var clientId = builder.Configuration["Identity:Google:ClientId"];
+        var clientSecret = builder.Configuration["Identity:Google:ClientSecret"];
+        if (!string.IsNullOrWhiteSpace(clientId) && !string.IsNullOrWhiteSpace(clientSecret))
+        {
+            auth.AddGoogle(google =>
+            {
+                google.ClientId = clientId;
+                google.ClientSecret = clientSecret;
+                google.SignInScheme = ExternalLoginEndpoints.ExternalScheme;
+                google.ClaimActions.MapJsonKey("email_verified", "email_verified");
+            });
+        }
     }
 
     /// <summary>

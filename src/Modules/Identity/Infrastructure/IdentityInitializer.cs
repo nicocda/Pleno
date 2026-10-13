@@ -1,14 +1,17 @@
+using Casino.BuildingBlocks;
 using Casino.Modules.Identity.Api;
+using Casino.Modules.Identity.Domain;
 using Casino.Modules.Identity.Application;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Options;
 using OpenIddict.Abstractions;
 
 namespace Casino.Modules.Identity.Infrastructure;
 
 /// <summary>Al arrancar: crea la base y las tablas si faltan, los roles del casino y el cliente OAuth publico del front.</summary>
-internal sealed class IdentityInitializer(IServiceProvider services) : IHostedService
+internal sealed class IdentityInitializer(IServiceProvider services, IOptions<IdentityLinksOptions> links) : IHostedService
 {
     public async Task StartAsync(CancellationToken cancellationToken)
     {
@@ -39,11 +42,22 @@ internal sealed class IdentityInitializer(IServiceProvider services) : IHostedSe
                         OpenIddictConstants.Permissions.Endpoints.Token,
                         OpenIddictConstants.Permissions.GrantTypes.Password,
                         OpenIddictConstants.Permissions.GrantTypes.RefreshToken,
+                        OpenIddictConstants.Permissions.Prefixes.GrantType + TokenEndpoint.ExternalCodeGrant,
                         OpenIddictConstants.Permissions.Scopes.Email,
                         OpenIddictConstants.Permissions.Prefixes.Scope + OpenIddictConstants.Scopes.OfflineAccess,
                     },
                 },
                 cancellationToken);
+        }
+
+        // Los alias de IdentityLinksOptions.AdminAliases reciben el rol de backoffice (el primer administrador sale de la configuracion).
+        var users = scope.ServiceProvider.GetRequiredService<UserManager<PlayerUser>>();
+        foreach (var alias in links.Value.AdminAliases)
+        {
+            if (await users.FindByNameAsync(alias) is { } admin && !await users.IsInRoleAsync(admin, Roles.Backoffice))
+            {
+                await users.AddToRoleAsync(admin, Roles.Backoffice);
+            }
         }
     }
 
