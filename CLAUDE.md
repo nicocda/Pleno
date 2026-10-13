@@ -7,6 +7,7 @@ Laboratorio de arquitectura distribuida en .NET. Ver `README.md` y `docs/PLAN.md
 
 ## Comandos
 - Levantar todo: `aspire run` (requiere Docker Desktop corriendo)
+  - La infraestructura (Postgres, pgAdmin, Redis, RabbitMQ) corre en contenedores **persistentes con nombre fijo** (`casino-postgres`, `casino-redis`, `casino-rabbitmq`, `casino-pgadmin`) y volumenes fijos (`casino-*-data`), compartidos por todos los worktrees: siguen corriendo al cerrar Aspire. Para liberar memoria: `docker stop casino-postgres casino-redis casino-rabbitmq casino-pgadmin`.
 - Build: `dotnet build Casino.slnx`
 - Tests: `dotnet test Casino.slnx`
 - Front (`web/`): `npm --prefix web run dev` · `test` · `lint` · `build` · `e2e` (el e2e necesita `aspire start`). Ver `docs/frontend.md`.
