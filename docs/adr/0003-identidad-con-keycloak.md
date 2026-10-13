@@ -1,6 +1,6 @@
 # ADR 0003 - Identidad con Keycloak (OpenID Connect)
 
-- **Estado:** aceptada
+- **Estado:** reemplazada por el [ADR 0017](0017-identidad-propia.md) (identidad propia, sin Keycloak)
 - **Fecha:** 2026-10-08
 
 ## Contexto

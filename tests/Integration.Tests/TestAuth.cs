@@ -20,7 +20,7 @@ namespace Casino.Integration.Tests;
 /// <summary>
 /// Emite tokens JWT de prueba con una clave aleatoria por corrida (nunca se guarda en disco) y configura la API para
 /// confiar en ella. La validacion que corre es la REAL de JwtBearer: firma, emisor, destinatario, vigencia y el
-/// mapeo de roles de Keycloak. Solo cambia de donde sale la clave publica.
+/// lectura de roles del claim "role". Solo cambia de donde sale la clave publica.
 /// </summary>
 public static class TestAuth
 {
@@ -29,7 +29,7 @@ public static class TestAuth
 
     private static readonly SymmetricSecurityKey SigningKey = new(RandomNumberGenerator.GetBytes(32));
 
-    /// <summary>Un token como el que entregaria Keycloak: "sub", "preferred_username" y roles dentro de "realm_access".</summary>
+    /// <summary>Un token como el que entrega el servicio de identidad: "sub", "preferred_username" y roles en el claim plano "role".</summary>
     public static string Token(
         Guid userId,
         string username = "tester",
@@ -38,7 +38,7 @@ public static class TestAuth
         TimeSpan? lifetime = null,
         SecurityKey? signingKey = null,
         string? subject = null,
-        object? realmAccess = null)
+        object? legacyRealmAccess = null)
     {
         var now = DateTime.UtcNow;
         var lifespan = lifetime ?? TimeSpan.FromMinutes(5);
@@ -54,10 +54,16 @@ public static class TestAuth
             {
                 ["sub"] = subject ?? userId.ToString(),
                 ["preferred_username"] = username,
-                ["realm_access"] = realmAccess ?? new Dictionary<string, object> { ["roles"] = roles ?? [Casino.BuildingBlocks.Roles.Player] },
+                ["role"] = roles ?? [Casino.BuildingBlocks.Roles.Player],
             },
             SigningCredentials = new SigningCredentials(signingKey ?? SigningKey, SecurityAlgorithms.HmacSha256),
         };
+        if (legacyRealmAccess is not null)
+        {
+            // El formato viejo (roles dentro de "realm_access"): ya no concede nada.
+            descriptor.Claims["realm_access"] = legacyRealmAccess;
+        }
+
         return new JsonWebTokenHandler().CreateToken(descriptor);
     }
 

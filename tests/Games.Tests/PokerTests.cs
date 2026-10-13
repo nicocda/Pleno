@@ -859,7 +859,14 @@ public sealed class PokerTests
         // Tres jugadores con entrada 100, comision 10 y hasta 2 recompras: se reservaron 3 x 330. El primero uso una recompra.
         var state = new PokerState
         {
-            Seats = 3, BuyIn = 100, Fee = 10, Rebuys = 2, RebuyCount = 1, Over = true, Done = true, Eliminated = [1, 2],
+            Seats = 3,
+            BuyIn = 100,
+            Fee = 10,
+            Rebuys = 2,
+            RebuyCount = 1,
+            Over = true,
+            Done = true,
+            Eliminated = [1, 2],
             Players = [new PokerPlayer { Stack = 400, RebuysUsed = 1 }, new PokerPlayer { Out = true, Ranked = true }, new PokerPlayer { Out = true, Ranked = true }],
         };
 

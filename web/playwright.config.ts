@@ -1,7 +1,7 @@
 import { defineConfig, devices } from "@playwright/test";
 
 // Pruebas de extremo a extremo con un navegador REAL contra el sistema levantado (`aspire start`):
-// front en :5173, API, Keycloak en :8080, RabbitMQ, Postgres y Redis. No corren en el CI: necesitan toda la infraestructura.
+// front en :5173, API, servicio de identidad en :8080, RabbitMQ, Postgres y Redis. No corren en el CI: necesitan toda la infraestructura.
 export default defineConfig({
   testDir: "./e2e",
   timeout: 120_000,

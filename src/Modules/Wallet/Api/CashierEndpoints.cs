@@ -65,7 +65,7 @@ internal static class CashierEndpoints
                     detail: $"El header {IdempotencyHeader} es obligatorio.");
             }
 
-            var roles = http.User.FindAll(System.Security.Claims.ClaimTypes.Role).Select(c => c.Value);
+            var roles = http.User.GetRoles();
             var result = await cashiers.LoadChipsAsync(http.User.GetUserId(), roles, body.ToUserId, body.Amount, key, ct);
             return Results.Ok(new LoadChipsResponse(result.Outcome.TransactionId, result.Outcome.IsDuplicate, result.Commission));
         });

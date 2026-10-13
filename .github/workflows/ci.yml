@@ -2,9 +2,9 @@ name: CI
 
 on:
   pull_request:
-    branches: [dev, main]
+    branches: [dev, main, dev-users]
   push:
-    branches: [dev, main]
+    branches: [dev, main, dev-users]
 
 permissions:
   contents: read
@@ -23,7 +23,14 @@ jobs:
           global-json-file: global.json
       - run: dotnet restore Casino.slnx
       - run: dotnet build Casino.slnx --no-restore -c Release -warnaserror
-      - run: dotnet test Casino.slnx --no-build -c Release
+      # En la rama de integracion dev-users (PR hacia ella y pushes) no se corren las pruebas de integracion (tardan mucho mas que el resto):
+      # se validan completas en el PR de dev-users hacia dev.
+      - name: Tests (sin integracion, rama dev-users)
+        if: github.base_ref == 'dev-users' || github.ref == 'refs/heads/dev-users'
+        run: dotnet test Casino.slnx --no-build -c Release --filter "FullyQualifiedName!~Casino.Integration.Tests"
+      - name: Tests
+        if: github.base_ref != 'dev-users' && github.ref != 'refs/heads/dev-users'
+        run: dotnet test Casino.slnx --no-build -c Release
       - run: dotnet format Casino.slnx --verify-no-changes --no-restore
       - uses: actions/setup-node@v7
         with:

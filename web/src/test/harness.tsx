@@ -1,56 +1,84 @@
-import type { User } from "oidc-client-ts";
 import { render } from "@testing-library/react";
 import type { ReactElement } from "react";
 import { MemoryRouter } from "react-router-dom";
 import { ApiProvider } from "../api/ApiProvider";
 import { ApiError, type ApiClient } from "../api/client";
 import { AuthProvider } from "../auth/AuthContext";
-import type { OidcManager } from "../auth/oidc";
+import type { AuthClient, AuthUser } from "../auth/identity";
 import { ToastProvider } from "../components/Toasts";
 import { RealtimeProvider, type ConnectionFactory, type HubConnectionLike } from "../realtime/RealtimeProvider";
 import { PerfProvider } from "../perf/PerfProvider";
 import { ThemeProvider } from "../theme/ThemeProvider";
 
 /** Un jugador ya autenticado, con token vigente. */
-export function fakeUser(overrides: Partial<{ expired: boolean; name: string }> = {}): User {
+export function fakeUser(overrides: Partial<{ expired: boolean; name: string; roles: string[] }> = {}): AuthUser {
   return {
     access_token: "token-de-prueba",
     expired: overrides.expired ?? false,
-    profile: { preferred_username: overrides.name ?? "jugador1", sub: "0a1b2c3d-0001-4000-8000-000000000001" },
-    state: undefined,
-  } as unknown as User;
+    profile: { preferred_username: overrides.name ?? "jugador1", sub: "0a1b2c3d-0001-4000-8000-000000000001", roles: overrides.roles ?? ["player"] },
+  };
 }
 
-export interface FakeOidc extends OidcManager {
-  spies: { signinRedirect: ReturnType<typeof vi.fn>; signoutRedirect: ReturnType<typeof vi.fn>; signinRedirectCallback: ReturnType<typeof vi.fn> };
-  emitUserLoaded(user: User): void;
+export interface FakeAuth extends AuthClient {
+  spies: {
+    signIn: ReturnType<typeof vi.fn>;
+    signInWithCode: ReturnType<typeof vi.fn>;
+    signOut: ReturnType<typeof vi.fn>;
+    register: ReturnType<typeof vi.fn>;
+    verifyEmail: ReturnType<typeof vi.fn>;
+    resendVerification: ReturnType<typeof vi.fn>;
+    forgotPassword: ReturnType<typeof vi.fn>;
+    resetPassword: ReturnType<typeof vi.fn>;
+  };
+  emitUserLoaded(user: AuthUser): void;
   emitUserUnloaded(): void;
 }
 
-export function fakeOidc(user: User | null = fakeUser()): FakeOidc {
-  const loaded = new Set<(user: User) => void>();
+/** Cliente de identidad simulado: iniciar sesion carga al usuario y cerrarla lo descarga, como el real. */
+export function fakeAuth(user: AuthUser | null = fakeUser(), options: { google?: boolean } = {}): FakeAuth {
+  const loaded = new Set<(user: AuthUser) => void>();
   const unloaded = new Set<() => void>();
-  const signinRedirect = vi.fn(async (_args?: { state?: unknown }) => undefined);
-  const signoutRedirect = vi.fn(async () => undefined);
-  const signinRedirectCallback = vi.fn(async () => ({ ...fakeUser(), state: { returnTo: "/ruleta" } }) as unknown as User);
+  const emitUserLoaded = (next: AuthUser) => loaded.forEach((cb) => cb(next));
+  const emitUserUnloaded = () => unloaded.forEach((cb) => cb());
+  const signIn = vi.fn(async (_login: string, _password: string) => {
+    const next = fakeUser();
+    emitUserLoaded(next);
+    return next;
+  });
+  const signInWithCode = vi.fn(async (_code: string) => {
+    const next = fakeUser();
+    emitUserLoaded(next);
+    return next;
+  });
+  const signOut = vi.fn(async () => emitUserUnloaded());
+  const register = vi.fn(async (_alias: string, _email: string, _password: string) => undefined);
+  const verifyEmail = vi.fn(async (_token: string) => undefined);
+  const resendVerification = vi.fn(async (_email: string) => undefined);
+  const forgotPassword = vi.fn(async (_email: string) => undefined);
+  const resetPassword = vi.fn(async (_token: string, _newPassword: string) => undefined);
   return {
-    spies: { signinRedirect, signoutRedirect, signinRedirectCallback },
+    spies: { signIn, signInWithCode, signOut, register, verifyEmail, resendVerification, forgotPassword, resetPassword },
     getUser: vi.fn(async () => user),
-    signinRedirect,
-    signoutRedirect,
-    signinRedirectCallback,
-    signinSilent: vi.fn(async () => user),
+    signIn,
+    signInWithCode,
+    signOut,
+    getAccessToken: vi.fn(async () => (user && !user.expired ? user.access_token : null)),
+    register,
+    verifyEmail,
+    resendVerification,
+    forgotPassword,
+    resetPassword,
+    providers: vi.fn(async () => ({ google: options.google ?? false })),
+    googleStartUrl: (returnUrl: string) => `http://identidad.test/identity/google/start?returnUrl=${encodeURIComponent(returnUrl)}`,
     events: {
       addUserLoaded: (cb) => void loaded.add(cb),
       removeUserLoaded: (cb) => void loaded.delete(cb),
       addUserUnloaded: (cb) => void unloaded.add(cb),
       removeUserUnloaded: (cb) => void unloaded.delete(cb),
-      addSilentRenewError: () => undefined,
-      removeSilentRenewError: () => undefined,
     },
-    emitUserLoaded: (next) => loaded.forEach((cb) => cb(next)),
-    emitUserUnloaded: () => unloaded.forEach((cb) => cb()),
-  } as FakeOidc;
+    emitUserLoaded,
+    emitUserUnloaded,
+  };
 }
 
 type Handler = (body?: unknown, headers?: Record<string, string>) => unknown;
@@ -121,8 +149,9 @@ export class FakeHub implements HubConnectionLike {
 }
 
 export interface AppOptions {
-  oidc?: OidcManager;
+  auth?: AuthClient;
   api?: ApiClient;
+  identityApi?: ApiClient;
   hub?: FakeHub;
   route?: string;
 }
@@ -131,16 +160,16 @@ export interface AppOptions {
 export function renderApp(ui: ReactElement, options: AppOptions = {}) {
   const hub = options.hub ?? new FakeHub();
   const connectionFactory: ConnectionFactory = () => hub;
-  const oidc = options.oidc ?? fakeOidc();
+  const auth = options.auth ?? fakeAuth();
   const api = options.api ?? fakeApi({});
 
   const view = render(
     <PerfProvider>
     <ThemeProvider>
       <ToastProvider>
-        <AuthProvider manager={oidc}>
+        <AuthProvider client={auth}>
           <MemoryRouter initialEntries={[options.route ?? "/"]}>
-            <ApiProvider client={api}>
+            <ApiProvider client={api} identityClient={options.identityApi ?? fakeApi({})}>
               <RealtimeProvider connectionFactory={connectionFactory}>{ui}</RealtimeProvider>
             </ApiProvider>
           </MemoryRouter>
@@ -149,5 +178,5 @@ export function renderApp(ui: ReactElement, options: AppOptions = {}) {
     </ThemeProvider>
     </PerfProvider>,
   );
-  return { ...view, hub, api, oidc };
+  return { ...view, hub, api, auth };
 }
