@@ -55,8 +55,18 @@ internal static class DevUsers
         }
     }
 
-    public static async Task SeedAsync(IServiceProvider services, CancellationToken ct)
+    public const int MinOverridePasswordLength = 12;
+
+    /// <param name="passwordOverride">
+    /// Si viene (modo demo: <c>Identity:SeedDevUsersPassword</c>), todos los usuarios de desarrollo usan esta contraseña en vez de las publicas del repositorio.
+    /// </param>
+    public static async Task SeedAsync(IServiceProvider services, string? passwordOverride, CancellationToken ct)
     {
+        if (!string.IsNullOrEmpty(passwordOverride) && passwordOverride.Length < MinOverridePasswordLength)
+        {
+            throw new InvalidOperationException($"'Identity:SeedDevUsersPassword' tiene que tener al menos {MinOverridePasswordLength} caracteres.");
+        }
+
         var users = services.GetRequiredService<UserManager<PlayerUser>>();
         var emails = services.GetRequiredService<EmailProtector>();
         var clock = services.GetRequiredService<TimeProvider>();
@@ -64,9 +74,18 @@ internal static class DevUsers
         for (var i = 0; i < Users.Length; i++)
         {
             ct.ThrowIfCancellationRequested();
-            var (alias, password, roles) = Users[i];
-            if (await users.FindByNameAsync(alias) is not null)
+            var (alias, publicPassword, roles) = Users[i];
+            var password = string.IsNullOrEmpty(passwordOverride) ? publicPassword : passwordOverride;
+            if (await users.FindByNameAsync(alias) is { } existing)
             {
+                if (!string.IsNullOrEmpty(passwordOverride))
+                {
+                    // La base ya tenia al usuario con la clave publica (de una corrida anterior): en modo demo se cambia y se cierran sus sesiones.
+                    existing.PasswordHash = users.PasswordHasher.HashPassword(existing, passwordOverride);
+                    await users.UpdateAsync(existing);
+                    await users.UpdateSecurityStampAsync(existing);
+                }
+
                 continue;
             }
 

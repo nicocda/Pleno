@@ -53,7 +53,7 @@ internal sealed class IdentityInitializer(IServiceProvider services, IOptions<Id
 
         if (environment.IsDevelopment() && configuration.GetValue<bool>("Identity:SeedDevUsers"))
         {
-            await DevUsers.SeedAsync(scope.ServiceProvider, cancellationToken);
+            await DevUsers.SeedAsync(scope.ServiceProvider, configuration["Identity:SeedDevUsersPassword"], cancellationToken);
             if (configuration.GetValue<int>("Identity:SeedLoadUsers") is > 0 and var loadUsers)
             {
                 await DevUsers.SeedLoadUsersAsync(scope.ServiceProvider, loadUsers, configuration["Identity:SeedLoadPassword"] ?? "load-dev-only", cancellationToken);

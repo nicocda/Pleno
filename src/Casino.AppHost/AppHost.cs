@@ -38,12 +38,25 @@ const int IdentityPort = 8080;
 // Modo red local (opcional): con `Lan:Host` (la IP de esta PC en la red, ver docs/red-local.md) el front se sirve por HTTPS en esa IP y
 // hace de unico punto de entrada: reenvia /api y las rutas de identidad al servicio correspondiente. Asi otros dispositivos solo necesitan llegar al 5173.
 // Sin `Lan:Host` todo queda como siempre, en http://localhost.
+// Modo demo (opcional, apagado por defecto): con `Lan:PublicUrl` (la URL de un devtunnel, ver docs/demo.md) el origen publico es esa URL; el tunel ya pone el HTTPS,
+// asi que el front sirve en HTTP. Como la URL es publica, EXIGE una contraseña propia para los usuarios de desarrollo (`Parameters:demo-users-password`):
+// las de docs/autenticacion.md son publicas.
 var lanHost = builder.Configuration["Lan:Host"];
-var lanMode = !string.IsNullOrWhiteSpace(lanHost);
+var publicUrl = builder.Configuration["Lan:PublicUrl"]?.TrimEnd('/');
+var tunnelMode = !string.IsNullOrWhiteSpace(publicUrl);
+var lanMode = tunnelMode || !string.IsNullOrWhiteSpace(lanHost);
+var publicOrigin = tunnelMode ? publicUrl! : $"https://{lanHost}:5173";
+if (tunnelMode && string.IsNullOrWhiteSpace(builder.Configuration["Parameters:demo-users-password"]))
+{
+    throw new InvalidOperationException(
+        "Modo demo (Lan:PublicUrl): falta una contraseña propia para los usuarios de desarrollo, porque las del repositorio son publicas. " +
+        "Guardala con: dotnet user-secrets set \"Parameters:demo-users-password\" \"<al menos 12 caracteres>\" --project src/Casino.AppHost (ver docs/demo.md).");
+}
+
 var identityLocal = string.Concat("http://localhost:", IdentityPort.ToString(System.Globalization.CultureInfo.InvariantCulture));
 var identityMetadata = lanMode ? identityLocal + "/.well-known/openid-configuration" : string.Empty;
-var identityAuthority = lanMode ? $"https://{lanHost}:5173" : identityLocal;
-var webOrigin = lanMode ? $"https://{lanHost}:5173" : "http://localhost:5173";
+var identityAuthority = lanMode ? publicOrigin : identityLocal;
+var webOrigin = lanMode ? publicOrigin : "http://localhost:5173";
 
 var identity = builder.AddProject<Projects.Casino_IdentityService>("identity")
     .WithReference(identityDb).WaitFor(identityDb)
@@ -58,6 +71,12 @@ var identity = builder.AddProject<Projects.Casino_IdentityService>("identity")
     .WithEnvironment("Identity__Email__CurrentKeyVersion", "1")
     .WithEnvironment("Identity__Email__EncryptionKeys__1", builder.AddParameter("identity-email-key", secret: true))
     .WithEnvironment("Identity__Email__HmacKey", builder.AddParameter("identity-email-hmac-key", secret: true));
+// En modo demo todos los usuarios de desarrollo usan la contraseña propia (nunca las publicas del repositorio).
+if (tunnelMode)
+{
+    identity.WithEnvironment("Identity__SeedDevUsersPassword", builder.AddParameter("demo-users-password", secret: true));
+}
+
 // Iniciar sesion con Google (opcional). Las credenciales de la app OAuth de Google son secretos: solo user-secrets en local y Key Vault en la nube.
 // Sin ellas el boton de Google no aparece y todo sigue igual. Ver docs/autenticacion.md.
 //   dotnet user-secrets set "Parameters:google-client-id" <valor> --project src/Casino.AppHost
@@ -106,6 +125,7 @@ if (lanMode)
 {
     // El navegador usa rutas relativas al propio origen; Vite (LAN_MODE) las reenvia a la API y a Keycloak.
     web.WithEnvironment("LAN_MODE", "true")
+        .WithEnvironment("LAN_TUNNEL", tunnelMode ? "true" : "false")
         .WithEnvironment("VITE_API_URL", "/api")
         .WithEnvironment("VITE_IDENTITY_URL", identityAuthority);
 }
