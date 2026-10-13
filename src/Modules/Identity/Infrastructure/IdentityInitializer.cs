@@ -3,6 +3,7 @@ using Casino.Modules.Identity.Api;
 using Casino.Modules.Identity.Domain;
 using Casino.Modules.Identity.Application;
 using Microsoft.AspNetCore.Identity;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Options;
@@ -11,7 +12,7 @@ using OpenIddict.Abstractions;
 namespace Casino.Modules.Identity.Infrastructure;
 
 /// <summary>Al arrancar: crea la base y las tablas si faltan, los roles del casino y el cliente OAuth publico del front.</summary>
-internal sealed class IdentityInitializer(IServiceProvider services, IOptions<IdentityLinksOptions> links) : IHostedService
+internal sealed class IdentityInitializer(IServiceProvider services, IOptions<IdentityLinksOptions> links, IHostEnvironment environment, IConfiguration configuration) : IHostedService
 {
     public async Task StartAsync(CancellationToken cancellationToken)
     {
@@ -48,6 +49,11 @@ internal sealed class IdentityInitializer(IServiceProvider services, IOptions<Id
                     },
                 },
                 cancellationToken);
+        }
+
+        if (environment.IsDevelopment() && configuration.GetValue<bool>("Identity:SeedDevUsers"))
+        {
+            await DevUsers.SeedAsync(scope.ServiceProvider, cancellationToken);
         }
 
         // Los alias de IdentityLinksOptions.AdminAliases reciben el rol de backoffice (el primer administrador sale de la configuracion).

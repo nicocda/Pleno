@@ -1,6 +1,6 @@
 """Arma el arbol de cajeros de DESARROLLO sobre una app local ya levantada (aspire run). Solo stdlib de Python 3.
 
-    python scripts/dev-jerarquia.py [--api http://localhost:5188] [--keycloak http://localhost:8080] [--fichas 10000]
+    python scripts/dev-jerarquia.py [--api http://localhost:5188] [--identity http://localhost:8080] [--fichas 10000]
 
 Hace, en orden (es idempotente: se puede correr de nuevo):
   1. Entra como cada usuario de desarrollo (cliente `casino-tests`, solo desarrollo) y llama a /me: asi se les abre la cuenta de fichas.
@@ -17,7 +17,7 @@ import urllib.parse
 import urllib.request
 import uuid
 
-# Ids fijos del realm de desarrollo (src/Casino.AppHost/realms/casino-realm.json).
+# Ids fijos de desarrollo del servicio de identidad (DevUsers, en src/Modules/Identity).
 JEFE = "0a1b2c3d-0004-4000-8000-000000000004"
 CAJERO = "0a1b2c3d-0005-4000-8000-000000000005"
 JUGADORES = ["0a1b2c3d-0001-4000-8000-000000000001", "0a1b2c3d-0002-4000-8000-000000000002"]
@@ -46,16 +46,16 @@ def request(method, url, token=None, data=None, form=None, headers=None):
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--api", default="http://localhost:5188")
-    parser.add_argument("--keycloak", default="http://localhost:8080")
+    parser.add_argument("--identity", default="http://localhost:8080")
     parser.add_argument("--fichas", type=int, default=10_000, help="fichas que el backoffice le acredita al jefe (0 = ninguna)")
     args = parser.parse_args()
 
     tokens = {}
     for name, password in DEV_USERS.items():
-        status, body = request("POST", f"{args.keycloak}/realms/casino/protocol/openid-connect/token",
-                               form={"grant_type": "password", "client_id": "casino-tests", "username": name, "password": password})
+        status, body = request("POST", f"{args.identity}/connect/token",
+                               form={"grant_type": "password", "client_id": "casino-web", "username": name, "password": password})
         if status != 200:
-            raise SystemExit(f"No pude entrar como {name} ({status}). ¿Esta Keycloak levantado y el realm tiene a ese usuario?")
+            raise SystemExit(f"No pude entrar como {name} ({status}). ¿Esta el servicio de identidad levantado con los usuarios de desarrollo?")
         tokens[name] = body["access_token"]
 
     # 1) Abrir las cuentas (el alta de jugador ocurre en el primer pedido).

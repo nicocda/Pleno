@@ -1,5 +1,3 @@
-using System.Security.Claims;
-using System.Text.Json;
 using Casino.BuildingBlocks;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Builder;
@@ -10,7 +8,7 @@ using Microsoft.Extensions.Hosting;
 namespace Casino.Hosting;
 
 /// <summary>
-/// Autenticacion con tokens JWT emitidos por Keycloak (OpenID Connect). Ningun servicio ve contraseñas: cada uno valida por su cuenta la
+/// Autenticacion con tokens JWT emitidos por el servicio de identidad (OpenID Connect). Ningun servicio ve contraseñas: cada uno valida por su cuenta la
 /// firma, el emisor, el destinatario (audience) y la vigencia del token (no confia en que otro ya lo haya hecho).
 /// </summary>
 public static class CasinoAuthentication
@@ -29,7 +27,7 @@ public static class CasinoAuthentication
         if (string.IsNullOrWhiteSpace(authority))
         {
             throw new InvalidOperationException(
-                "Falta 'Authentication:Authority' (la URL del realm de Keycloak, por ejemplo http://localhost:8080/realms/casino). La inyecta Aspire.");
+                "Falta 'Authentication:Authority' (la URL del servicio de identidad, por ejemplo http://localhost:8080). La inyecta Aspire.");
         }
 
         builder.Services
@@ -37,8 +35,8 @@ public static class CasinoAuthentication
             .AddJwtBearer(options =>
             {
                 options.Authority = authority;
-                // En modo red local el emisor es la URL publica (https://<ip>:5173/realms/casino), que el servicio no alcanza (certificado
-                // autofirmado): los metadatos se leen de Keycloak directo y el emisor del token se sigue validando contra Authority.
+                // En modo red local el emisor es la URL publica (https://<ip>:5173), que el servicio no alcanza (certificado
+                // autofirmado): los metadatos se leen del servicio de identidad directo y el emisor del token se sigue validando contra Authority.
                 if (builder.Configuration["Authentication:MetadataAddress"] is { Length: > 0 } metadataAddress)
                 {
                     options.MetadataAddress = metadataAddress;
@@ -48,7 +46,7 @@ public static class CasinoAuthentication
                 options.RequireHttpsMetadata = !builder.Environment.IsDevelopment();
                 options.MapInboundClaims = false; // conserva "sub" y "preferred_username" tal cual vienen en el token
                 options.TokenValidationParameters.NameClaimType = "preferred_username";
-                options.TokenValidationParameters.RoleClaimType = ClaimTypes.Role;
+                options.TokenValidationParameters.RoleClaimType = "role"; // el servicio de identidad emite los roles en el claim plano "role"
                 options.Events = new JwtBearerEvents
                 {
                     OnMessageReceived = context =>
@@ -70,38 +68,11 @@ public static class CasinoAuthentication
                             return Task.CompletedTask;
                         }
 
-                        MapRealmRoles(context.Principal);
                         return Task.CompletedTask;
                     },
                 };
             });
         builder.Services.AddAuthorization();
         return builder;
-    }
-
-    /// <summary>Keycloak entrega los roles del realm dentro del claim JSON "realm_access": { "roles": [...] }. Se pasan a roles de .NET.</summary>
-    private static void MapRealmRoles(ClaimsPrincipal? principal)
-    {
-        if (principal?.Identity is not ClaimsIdentity identity
-            || principal.FindFirst("realm_access")?.Value is not { } realmAccess)
-        {
-            return;
-        }
-
-        try
-        {
-            using var document = JsonDocument.Parse(realmAccess);
-            if (document.RootElement.TryGetProperty("roles", out var roles) && roles.ValueKind == JsonValueKind.Array)
-            {
-                foreach (var role in roles.EnumerateArray().Select(r => r.GetString()).OfType<string>())
-                {
-                    identity.AddClaim(new Claim(ClaimTypes.Role, role));
-                }
-            }
-        }
-        catch (JsonException)
-        {
-            // Un claim mal formado no concede ningun rol: queda sin permisos.
-        }
     }
 }
