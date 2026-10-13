@@ -29,6 +29,8 @@ public static class IdentityModule
     public const string RateLimitPolicy = "identity-auth";
     public const string CorsPolicy = "identity-web";
 
+    private static readonly string[] TrustedProxyNetworks = ["127.0.0.0/8", "::1/128", "10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "fc00::/7"];
+
     public static WebApplicationBuilder AddIdentityModule(this WebApplicationBuilder builder)
     {
         ArgumentNullException.ThrowIfNull(builder);
@@ -111,12 +113,18 @@ public static class IdentityModule
 
         var origins = builder.Configuration.GetSection("Identity:AllowedReturnOrigins").Get<string[]>() ?? new IdentityLinksOptions().AllowedReturnOrigins;
         services.AddCors(cors => cors.AddPolicy(CorsPolicy, policy => policy.WithOrigins(origins).AllowAnyHeader().AllowAnyMethod()));
-        // Detras del proxy (Caddy) llegan la IP, el esquema y el host reales en cabeceras X-Forwarded-*. Solo es seguro si el puerto del servicio no se expone fuera del proxy.
+        // Detras del proxy (Caddy) llegan la IP, el esquema y el host reales en cabeceras X-Forwarded-*, y solo se aceptan de proxys de la red local.
         services.Configure<ForwardedHeadersOptions>(forwarded =>
         {
             forwarded.ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto | ForwardedHeaders.XForwardedHost;
+            // Solo se confia en proxys de la red local (loopback y rangos privados, como la red de Docker): un cliente de afuera no puede falsear su IP
+            // para esquivar el limite de peticiones.
             forwarded.KnownIPNetworks.Clear();
             forwarded.KnownProxies.Clear();
+            foreach (var network in TrustedProxyNetworks)
+            {
+                forwarded.KnownIPNetworks.Add(System.Net.IPNetwork.Parse(network));
+            }
         });
 
         services.AddHostedService<IdentityInitializer>();

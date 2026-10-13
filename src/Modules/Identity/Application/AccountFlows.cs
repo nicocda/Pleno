@@ -114,6 +114,11 @@ public sealed class AccountFlows(
     public async Task<ResetOutcome> ResetPasswordAsync(string? token, string? newPassword, CancellationToken ct)
     {
         // Primero se comprueba la clave, para no gastar el token si el usuario escribio una clave debil y tiene que reintentar.
+        if (string.IsNullOrEmpty(newPassword))
+        {
+            return ResetOutcome.WeakPassword;
+        }
+
         var probe = new PlayerUser();
         foreach (var validator in users.PasswordValidators)
         {

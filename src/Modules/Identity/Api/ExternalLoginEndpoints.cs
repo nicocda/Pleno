@@ -30,11 +30,11 @@ internal static class ExternalLoginEndpoints
             .WithTags("Identity");
 
         // El front pregunta que formas de entrar hay (el boton de Google solo aparece si esta configurado).
-        group.MapGet("/providers", (IServiceProvider services) => Results.Ok(new { google = IsGoogleEnabled(services) }));
+        group.MapGet("/providers", async (IAuthenticationSchemeProvider schemes) => Results.Ok(new { google = await IsGoogleEnabledAsync(schemes) }));
 
-        group.MapGet("/google/start", (string returnUrl, HttpContext http, IOptions<IdentityLinksOptions> links) =>
+        group.MapGet("/google/start", async (string returnUrl, IAuthenticationSchemeProvider schemes, IOptions<IdentityLinksOptions> links) =>
         {
-            if (!IsGoogleEnabled(http.RequestServices))
+            if (!await IsGoogleEnabledAsync(schemes))
             {
                 return Results.NotFound();
             }
@@ -72,9 +72,8 @@ internal static class ExternalLoginEndpoints
         });
     }
 
-    public static bool IsGoogleEnabled(IServiceProvider services) =>
-        services.GetService<IAuthenticationSchemeProvider>() is { } schemes
-        && schemes.GetSchemeAsync(GoogleDefaults.AuthenticationScheme).GetAwaiter().GetResult() is not null;
+    private static async Task<bool> IsGoogleEnabledAsync(IAuthenticationSchemeProvider schemes) =>
+        await schemes.GetSchemeAsync(GoogleDefaults.AuthenticationScheme) is not null;
 
     /// <summary>Solo se vuelve a un origen del front que este en la lista (evita usar el login como redireccion abierta).</summary>
     private static bool IsAllowedReturn(string? returnUrl, IdentityLinksOptions options) =>

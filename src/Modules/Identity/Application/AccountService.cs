@@ -5,6 +5,7 @@ using Casino.Modules.Identity.Domain;
 using Casino.Modules.Identity.Infrastructure;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
 
 namespace Casino.Modules.Identity.Application;
 
@@ -20,7 +21,7 @@ public enum RegisterOutcome
 public sealed record RegisterResult(RegisterOutcome Outcome, IReadOnlyList<string> PasswordErrors);
 
 /// <summary>Altas y busquedas de cuentas. El email entra por aca y se protege antes de tocar la base.</summary>
-public sealed class AccountService(UserManager<PlayerUser> users, IdentityDb db, EmailProtector emails, AccountFlows flows, TimeProvider clock)
+public sealed partial class AccountService(UserManager<PlayerUser> users, IdentityDb db, EmailProtector emails, AccountFlows flows, TimeProvider clock, ILogger<AccountService> logger)
 {
     private const string AliasAlphabet = "abcdefghjkmnpqrstuvwxyz23456789";
 
@@ -45,7 +46,17 @@ public sealed class AccountService(UserManager<PlayerUser> users, IdentityDb db,
         }
 
         var user = NewUser(alias!, email!, hash);
-        var created = await users.CreateAsync(user, password ?? string.Empty);
+        IdentityResult created;
+        try
+        {
+            created = await users.CreateAsync(user, password ?? string.Empty);
+        }
+        catch (DbUpdateException)
+        {
+            // Dos altas simultaneas con el mismo email: gano la otra (indice unico del hash). Se responde igual que un alta.
+            return new RegisterResult(RegisterOutcome.Created, []);
+        }
+
         if (!created.Succeeded)
         {
             if (created.Errors.Any(e => e.Code is nameof(IdentityErrorDescriber.DuplicateUserName)))
@@ -57,7 +68,17 @@ public sealed class AccountService(UserManager<PlayerUser> users, IdentityDb db,
         }
 
         await users.AddToRoleAsync(user, Roles.Player);
-        await flows.SendVerificationAsync(user, email!, ct);
+        try
+        {
+            await flows.SendVerificationAsync(user, email!, ct);
+        }
+#pragma warning disable CA1031 // La cuenta ya existe: si el correo falla se responde igual (se puede pedir el reenvio) y se deja registro, sin el email.
+        catch (Exception exception) when (exception is not OperationCanceledException)
+#pragma warning restore CA1031
+        {
+            LogVerificationMailFailed(logger, exception);
+        }
+
         return new RegisterResult(RegisterOutcome.Created, []);
     }
 
@@ -117,14 +138,30 @@ public sealed class AccountService(UserManager<PlayerUser> users, IdentityDb db,
             var created = await users.CreateAsync(user);
             if (created.Succeeded)
             {
-                await users.AddToRoleAsync(user, Roles.Player);
-                await users.AddLoginAsync(user, new UserLoginInfo(provider, subject, provider));
+                var role = await users.AddToRoleAsync(user, Roles.Player);
+                var login = role.Succeeded ? await users.AddLoginAsync(user, new UserLoginInfo(provider, subject, provider)) : role;
+                if (!login.Succeeded)
+                {
+                    // No se deja una cuenta a medias (sin rol o sin vinculo): se borra y el proximo intento empieza de cero.
+                    await users.DeleteAsync(user);
+                    throw new InvalidOperationException("No se pudo completar la cuenta externa.");
+                }
+
                 return user;
+            }
+
+            // Solo se reintenta si el alias generado ya existia; cualquier otro fallo se informa.
+            if (!created.Errors.Any(e => e.Code is nameof(IdentityErrorDescriber.DuplicateUserName)))
+            {
+                throw new InvalidOperationException("No se pudo crear la cuenta externa.");
             }
         }
 
         throw new InvalidOperationException("No se pudo crear la cuenta externa.");
     }
+
+    [LoggerMessage(Level = LogLevel.Warning, Message = "No se pudo enviar el correo de verificacion de una cuenta nueva (puede pedir el reenvio)")]
+    private static partial void LogVerificationMailFailed(ILogger logger, Exception exception);
 
     private PlayerUser NewUser(string alias, string email, string hash) => new()
     {

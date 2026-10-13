@@ -4,7 +4,7 @@ export const UNREACHABLE_MESSAGE =
   "No pudimos conectar con el servidor de identidad. Si recién arrancó el sistema, esperá unos segundos y volvé a intentar.";
 
 const MESSAGES: Record<AuthErrorCode, string> = {
-  invalid_credentials: "Usuario o contraseña incorrectos.",
+  invalid_credentials: "Usuario o contraseña incorrectos. Si hiciste varios intentos, esperá unos minutos o recuperá tu contraseña.",
   email_not_verified: "Tu email todavía no está verificado. Revisá tu correo o pedí que te lo reenviemos.",
   unreachable: UNREACHABLE_MESSAGE,
   rate_limited: "Demasiados intentos. Esperá un minuto y volvé a intentar.",

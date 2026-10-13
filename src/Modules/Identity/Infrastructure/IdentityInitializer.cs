@@ -64,7 +64,8 @@ internal sealed class IdentityInitializer(IServiceProvider services, IOptions<Id
         var users = scope.ServiceProvider.GetRequiredService<UserManager<PlayerUser>>();
         foreach (var alias in links.Value.AdminAliases)
         {
-            if (await users.FindByNameAsync(alias) is { } admin && !await users.IsInRoleAsync(admin, Roles.Backoffice))
+            // Solo una cuenta con el email verificado: quien se registre primero con ese alias (sin poder verificar nada) no se vuelve administrador.
+            if (await users.FindByNameAsync(alias) is { EmailConfirmed: true } admin && !await users.IsInRoleAsync(admin, Roles.Backoffice))
             {
                 await users.AddToRoleAsync(admin, Roles.Backoffice);
             }

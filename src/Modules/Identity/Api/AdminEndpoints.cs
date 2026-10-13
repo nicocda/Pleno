@@ -70,8 +70,19 @@ internal static class AdminEndpoints
             }
 
             var current = await manager.GetRolesAsync(user);
-            await manager.RemoveFromRolesAsync(user, current.Except(wanted));
-            await manager.AddToRolesAsync(user, wanted.Except(current));
+            // Siempre tiene que quedar al menos un administrador.
+            if (current.Contains(Roles.Backoffice) && !wanted.Contains(Roles.Backoffice) && (await manager.GetUsersInRoleAsync(Roles.Backoffice)).Count <= 1)
+            {
+                return Results.BadRequest(new { error = "last_backoffice" });
+            }
+
+            var removed = await manager.RemoveFromRolesAsync(user, current.Except(wanted));
+            var added = removed.Succeeded ? await manager.AddToRolesAsync(user, wanted.Except(current)) : removed;
+            if (!added.Succeeded)
+            {
+                return Results.Problem("No se pudieron guardar los roles.");
+            }
+
             // Los tokens ya emitidos llevan los roles viejos: se cierran las sesiones para que el proximo login los refleje.
             await manager.UpdateSecurityStampAsync(user);
             await openIddictTokens.RevokeBySubjectAsync(id.ToString(), ct);
