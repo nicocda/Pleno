@@ -10,7 +10,7 @@ public interface IEmailSender
 
 /// <summary>
 /// Datos de envio y de los enlaces. <c>Email:Smtp:*</c> (host, puerto, usuario, clave) son secretos fuera de Development.
-/// Sin <c>Host</c>, solo en Development, los correos se escriben en el log (sin el destinatario) para poder probar el flujo.
+/// Sin <c>Host</c>, solo en Development, los correos se guardan en memoria (<c>DevMailbox</c>) y se leen en un endpoint de desarrollo; nunca se escriben en el log.
 /// </summary>
 public sealed class EmailOptions
 {

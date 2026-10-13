@@ -51,7 +51,7 @@ Sin esas credenciales el boton no aparece (`GET /identity/providers` dice `googl
 - **Verificar el email:** el correo trae un enlace `/verificar?token=...` (vale 24 h, un solo uso). **Sin verificar no se entra** (`error_description=email_not_verified`). `POST /identity/verify-email`, `POST /identity/resend-verification`.
 - **Recuperar la clave:** `POST /identity/forgot-password` (siempre 202) manda `/recuperar?token=...` (vale 1 h, un solo uso); `POST /identity/reset-password` cambia la clave, verifica el email, levanta el bloqueo y **cierra las demas sesiones**.
 - **Defensas:** bloqueo de la cuenta tras 5 intentos fallidos (15 minutos) y limite de peticiones por IP en estos endpoints y en el login.
-- **En desarrollo** el correo no sale: sin `Email:Smtp:Host` los mensajes se escriben en el log del servicio de identidad (asunto y cuerpo, nunca el destinatario) para seguir los enlaces a mano.
+- **En desarrollo** el correo no sale: sin `Email:Smtp:Host` los mensajes se guardan en memoria (los ultimos 50) y se leen en `GET http://localhost:8080/identity/dev/emails` para seguir los enlaces a mano. **Nunca van al log ni a la telemetria** (traen tokens); solo el asunto se loguea. Ese endpoint existe unicamente en `Development`.
 
 ## Usuarios de desarrollo
 **Solo para desarrollo local.** Los siembra el servicio de identidad al arrancar, unicamente en `Development` y con `Identity:SeedDevUsers=true` (lo pone el AppHost). Las contraseñas son triviales a proposito y el repositorio es publico: no las reutilices en ningun lado.

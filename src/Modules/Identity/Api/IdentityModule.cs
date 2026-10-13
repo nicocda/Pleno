@@ -150,6 +150,7 @@ public static class IdentityModule
         AccountEndpoints.Map(app);
         TokenEndpoint.Map(app);
         ExternalLoginEndpoints.Map(app);
+        DevEndpoints.Map(app);
         AdminEndpoints.Map(app);
         return app;
     }
@@ -175,11 +176,18 @@ public static class IdentityModule
     {
         if (!string.IsNullOrWhiteSpace(builder.Configuration["Email:Smtp:Host"]))
         {
+            // Los correos llevan enlaces con tokens y la clave SMTP viaja en la conexion: fuera de Development el transporte tiene que ir cifrado (TLS).
+            if (!builder.Environment.IsDevelopment() && !builder.Configuration.GetValue("Email:Smtp:EnableSsl", true))
+            {
+                throw new InvalidOperationException("'Email:Smtp:EnableSsl' no puede ser false fuera de Development: el correo tiene que viajar cifrado.");
+            }
+
             builder.Services.AddSingleton<IEmailSender, SmtpEmailSender>();
         }
         else if (builder.Environment.IsDevelopment())
         {
-            builder.Services.AddSingleton<IEmailSender, LogEmailSender>();
+            builder.Services.AddSingleton<DevMailbox>();
+            builder.Services.AddSingleton<IEmailSender, DevEmailSender>();
         }
         else
         {
