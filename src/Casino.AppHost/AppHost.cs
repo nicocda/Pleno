@@ -39,6 +39,8 @@ var identity = builder.AddProject<Projects.Casino_IdentityService>("identity")
     .WithEnvironment("Identity__PublicWebUrl", webOrigin)
     .WithEnvironment("Identity__AllowedReturnOrigins__0", webOrigin)
     .WithEnvironment("Identity__SeedDevUsers", "true")
+    // Pruebas de carga: `Identity:SeedLoadUsers=N` (por ejemplo `aspire run -- --Identity:SeedLoadUsers=50`) siembra load-001..N (solo desarrollo).
+    .WithEnvironment("Identity__SeedLoadUsers", builder.Configuration["Identity:SeedLoadUsers"] ?? "0")
     .WithEnvironment("Identity__AdminAliases__0", "backoffice1")
     .WithEnvironment("Identity__Email__CurrentKeyVersion", "1")
     .WithEnvironment("Identity__Email__EncryptionKeys__1", builder.AddParameter("identity-email-key", secret: true))

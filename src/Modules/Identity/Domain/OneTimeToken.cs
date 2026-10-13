@@ -7,6 +7,12 @@ public static class OneTimeTokenPurpose
 
     /// <summary>Codigo de un solo uso que el front cambia por tokens despues de entrar con Google.</summary>
     public const string ExternalLogin = "external_login";
+
+    /// <summary>Marcas (no son tokens) que limitan cuantos correos se mandan por cuenta y tipo.</summary>
+    public const string ThrottleVerify = "throttle_verify";
+
+    public const string ThrottleReset = "throttle_reset";
+    public const string ThrottleNotice = "throttle_notice";
 }
 
 /// <summary>

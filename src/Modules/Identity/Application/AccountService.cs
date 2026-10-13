@@ -38,9 +38,9 @@ public sealed class AccountService(UserManager<PlayerUser> users, IdentityDb db,
 
         var hash = emails.Hash(email!);
         // Si el email ya tiene cuenta se responde igual que un alta (no se revela quien esta registrado) y el dueño recibe un aviso.
-        if (await db.Users.AnyAsync(u => u.EmailHash == hash, ct))
+        if (await db.Users.Where(u => u.EmailHash == hash).Select(u => (Guid?)u.Id).FirstOrDefaultAsync(ct) is { } existingId)
         {
-            await flows.SendAlreadyRegisteredAsync(email!, ct);
+            await flows.SendAlreadyRegisteredAsync(existingId, email!, ct);
             return new RegisterResult(RegisterOutcome.Created, []);
         }
 

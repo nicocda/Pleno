@@ -1,5 +1,10 @@
 using System.Net;
 using System.Net.Http.Json;
+using Casino.Modules.Identity.Application;
+using Casino.Modules.Identity.Domain;
+using Casino.Modules.Identity.Infrastructure;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
 using static Casino.Identity.Tests.IdentityServiceFixture;
 
 namespace Casino.Identity.Tests;
@@ -101,5 +106,42 @@ public sealed class AccountRecoveryTests(IdentityServiceFixture fixture) : IClas
 
         Assert.Equal(HttpStatusCode.Accepted, response.StatusCode);
         Assert.DoesNotContain(fixture.Emails.Sent, m => m.To == "fantasma@example.com");
+    }
+
+    [Fact]
+    public async Task Pedir_varias_veces_seguidas_no_llena_de_correos_la_casilla()
+    {
+        var client = Client();
+        await RegisterAsync(client, "oli_rec", "oli.rec@example.com", Password);
+        await fixture.RegisterConfirmedAsync(client, "pablo_rec", "pablo.rec@example.com", Password);
+        var before = fixture.Emails.Sent.Count(m => m.To == "oli.rec@example.com");
+
+        for (var i = 0; i < 3; i++)
+        {
+            await client.PostAsJsonAsync("/identity/resend-verification", new { email = "oli.rec@example.com" });
+            await client.PostAsJsonAsync("/identity/forgot-password", new { email = "pablo.rec@example.com" });
+            await RegisterAsync(client, $"pablo_rec{i}", "pablo.rec@example.com", Password);
+        }
+
+        Assert.Equal(before + 1, fixture.Emails.Sent.Count(m => m.To == "oli.rec@example.com"));
+        Assert.Equal(1, fixture.Emails.Sent.Count(m => m.To == "pablo.rec@example.com" && m.Subject == "Recupera tu clave"));
+        Assert.Equal(1, fixture.Emails.Sent.Count(m => m.To == "pablo.rec@example.com" && m.Subject == "Ya tienes una cuenta"));
+    }
+
+    [Fact]
+    public async Task La_limpieza_borra_los_tokens_vencidos_y_deja_los_vigentes()
+    {
+        await using var scope = fixture.Factory.Services.CreateAsyncScope();
+        var db = scope.ServiceProvider.GetRequiredService<IdentityDb>();
+        var tokens = scope.ServiceProvider.GetRequiredService<OneTimeTokenService>();
+        var user = Guid.NewGuid();
+        db.OneTimeTokens.Add(new OneTimeToken { Id = Guid.NewGuid(), UserId = user, Purpose = OneTimeTokenPurpose.ConfirmEmail, TokenHash = "viejo-" + Guid.NewGuid().ToString("N"), ExpiresAt = DateTimeOffset.UtcNow.AddDays(-3) });
+        db.OneTimeTokens.Add(new OneTimeToken { Id = Guid.NewGuid(), UserId = user, Purpose = OneTimeTokenPurpose.ConfirmEmail, TokenHash = "vigente-" + Guid.NewGuid().ToString("N"), ExpiresAt = DateTimeOffset.UtcNow.AddHours(1) });
+        await db.SaveChangesAsync();
+
+        var purged = await tokens.PurgeAsync(CancellationToken.None);
+
+        Assert.True(purged >= 1);
+        Assert.Equal(1, await db.OneTimeTokens.CountAsync(t => t.UserId == user));
     }
 }

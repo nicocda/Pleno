@@ -27,6 +27,9 @@ public sealed class AccountFlows(
     private static readonly TimeSpan ConfirmLifetime = TimeSpan.FromHours(24);
     private static readonly TimeSpan ResetLifetime = TimeSpan.FromHours(1);
 
+    /// <summary>Entre dos correos del mismo tipo a la misma cuenta tiene que pasar este tiempo.</summary>
+    private static readonly TimeSpan MailInterval = TimeSpan.FromMinutes(1);
+
     public async Task SendVerificationAsync(PlayerUser user, string email, CancellationToken ct)
     {
         var token = await tokens.IssueAsync(user.Id, OneTimeTokenPurpose.ConfirmEmail, ConfirmLifetime, ct);
@@ -39,13 +42,20 @@ public sealed class AccountFlows(
     }
 
     /// <summary>Aviso cuando alguien se registra con un email que ya tiene cuenta: el dueño se entera y puede recuperar la clave, y quien intenta no aprende nada.</summary>
-    public Task SendAlreadyRegisteredAsync(string email, CancellationToken ct) =>
-        sender.SendAsync(
+    public async Task SendAlreadyRegisteredAsync(Guid existingUserId, string email, CancellationToken ct)
+    {
+        if (!await tokens.TryClaimSlotAsync(existingUserId, OneTimeTokenPurpose.ThrottleNotice, MailInterval, ct))
+        {
+            return;
+        }
+
+        await sender.SendAsync(
             new EmailMessage(
                 email.Trim(),
                 "Ya tienes una cuenta",
                 $"Alguien intento registrarse con este email, pero ya tiene una cuenta. Si fuiste tu y no recuerdas la clave, puedes cambiarla aqui: {Link("recuperar", null)}"),
             ct);
+    }
 
     public async Task<bool> VerifyEmailAsync(string? token, CancellationToken ct)
     {
@@ -74,7 +84,7 @@ public sealed class AccountFlows(
 
         var hash = emails.Hash(email);
         var user = await db.Users.FirstOrDefaultAsync(u => u.EmailHash == hash && !u.EmailConfirmed, ct);
-        if (user is not null)
+        if (user is not null && await tokens.TryClaimSlotAsync(user.Id, OneTimeTokenPurpose.ThrottleVerify, MailInterval, ct))
         {
             await SendVerificationAsync(user, email, ct);
         }
@@ -90,7 +100,7 @@ public sealed class AccountFlows(
 
         var hash = emails.Hash(email);
         var user = await db.Users.FirstOrDefaultAsync(u => u.EmailHash == hash, ct);
-        if (user is null)
+        if (user is null || !await tokens.TryClaimSlotAsync(user.Id, OneTimeTokenPurpose.ThrottleReset, MailInterval, ct))
         {
             return;
         }

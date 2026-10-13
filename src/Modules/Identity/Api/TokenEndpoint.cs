@@ -22,6 +22,8 @@ internal static class TokenEndpoint
 {
     public const string ExternalCodeGrant = "urn:casino:grant_type:external_code";
 
+    private static readonly PlayerUser TimingDummy = new();
+
     public static void Map(IEndpointRouteBuilder app) =>
         app.MapPost("/connect/token", HandleAsync)
             .RequireRateLimiting(IdentityModule.RateLimitPolicy)
@@ -38,6 +40,12 @@ internal static class TokenEndpoint
             var user = await accounts.FindForLoginAsync(request.Username, ct);
             if (user is null || string.IsNullOrEmpty(request.Password))
             {
+                // Se gasta el mismo tiempo que al comprobar una clave real: la demora no dice si la cuenta existe.
+                if (!string.IsNullOrEmpty(request.Password))
+                {
+                    users.PasswordHasher.HashPassword(TimingDummy, request.Password);
+                }
+
                 return Invalid("Usuario o clave incorrectos.");
             }
 

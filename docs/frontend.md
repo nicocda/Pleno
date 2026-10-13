@@ -3,11 +3,11 @@
 React 19 + Vite + TypeScript. Decisiones y motivos: [ADR 0005](adr/0005-frontend-react-con-oidc.md).
 
 ## Levantarlo
-Con todo el sistema (recomendado): `aspire start` levanta Postgres, RabbitMQ, Redis, Keycloak, la API **y el front** en
+Con todo el sistema (recomendado): `aspire start` levanta Postgres, RabbitMQ, Redis, el servicio de identidad, la API **y el front** en
 **http://localhost:5173**. Entrá con `jugador1` / `jugador1-dev` o `jugador2` / `jugador2-dev` (ver [autenticacion.md](autenticacion.md)),
-o creá una cuenta nueva desde la pantalla de Keycloak.
+o creá una cuenta nueva desde la pantalla de entrada (alias, email y contraseña; en desarrollo el correo de verificación aparece en el log del servicio de identidad).
 
-Solo el front (necesita la API y Keycloak ya corriendo):
+Solo el front (necesita la API y el servicio de identidad ya corriendo):
 
 ```
 cd web
@@ -18,7 +18,7 @@ npm run dev
 ## Comandos
 | Comando | Qué hace |
 | --- | --- |
-| `npm run dev` | Servidor de desarrollo en :5173 (el puerto es fijo: Keycloak solo acepta esa redirección) |
+| `npm run dev` | Servidor de desarrollo en :5173 (el puerto es fijo: el servicio de identidad solo acepta volver a ese origen) |
 | `npm run build` | Chequeo de tipos y build de producción |
 | `npm run lint` | ESLint (incluye las reglas de React hooks) |
 | `npm test` | Pruebas unitarias y de componentes (Vitest) |
@@ -40,7 +40,7 @@ La API necesita `Cors:AllowedOrigins` con el origen del front (el AppHost ya lo 
 ## Estructura
 ```
 web/src/
-  auth/        sesión OIDC (AuthProvider), regreso de Keycloak, puerta de páginas privadas
+  auth/        sesión (AuthProvider + cliente de identidad), puerta de páginas privadas
   api/         cliente HTTP con token, tipos del contrato, hooks de datos
   realtime/    conexión SignalR y saldo en vivo (reductor con versión)
   pages/       Lobby, Ruleta, Historial
@@ -52,7 +52,7 @@ web/e2e/       recorridos con navegador real
 ```
 
 ## Qué hay hoy
-- Login/logout con Keycloak, saldo en vivo con indicador de conexión, tema claro y oscuro.
+- Entrar / crear cuenta con alias, email y contraseña (o Google), verificación de email, recuperación de clave, saldo en vivo con indicador de conexión, tema claro y oscuro.
 - Lobby con catálogo (Ruleta disponible; el resto "Próximamente") y últimas jugadas.
 - Mesa de ruleta: tapete completo (los 37 números, caballos, calles, cuadros, seisenas, docenas, columnas y chances simples) y rueda animada con PixiJS. Se puede apostar a varios lugares en la misma tirada (con "Deshacer" y "Quitar todo").
 - Tragamonedas de 3 rodillos con tabla de pagos y retorno publicados (`/tragamonedas`); los rodillos frenan en lo que ya decidió el servidor.

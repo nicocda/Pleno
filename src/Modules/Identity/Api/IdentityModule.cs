@@ -33,6 +33,7 @@ public static class IdentityModule
     {
         ArgumentNullException.ThrowIfNull(builder);
         var services = builder.Services;
+        RequireDeploymentSettings(builder);
 
         services.AddOptions<EmailProtectionOptions>().Bind(builder.Configuration.GetSection(EmailProtectionOptions.SectionName));
         services.AddSingleton<EmailProtector>();
@@ -119,6 +120,7 @@ public static class IdentityModule
         });
 
         services.AddHostedService<IdentityInitializer>();
+        services.AddHostedService<TokenCleanup>();
         return builder;
     }
 
@@ -142,6 +144,23 @@ public static class IdentityModule
         ExternalLoginEndpoints.Map(app);
         AdminEndpoints.Map(app);
         return app;
+    }
+
+    /// <summary>Fuera de Development no se arranca con los valores de desarrollo: el emisor, el origen del front y las claves tienen que estar configurados.</summary>
+    private static void RequireDeploymentSettings(WebApplicationBuilder builder)
+    {
+        if (builder.Environment.IsDevelopment())
+        {
+            return;
+        }
+
+        foreach (var key in new[] { "Identity:Issuer", "Identity:PublicWebUrl", "Identity:AllowedReturnOrigins:0" })
+        {
+            if (string.IsNullOrWhiteSpace(builder.Configuration[key]))
+            {
+                throw new InvalidOperationException($"Falta la configuracion '{key}'. Ver docs/autenticacion.md.");
+            }
+        }
     }
 
     private static void AddEmailSender(WebApplicationBuilder builder)
