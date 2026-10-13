@@ -8,7 +8,7 @@ contraseña con hash. Emite tokens OpenID Connect (OpenIddict): el JWT lleva `su
 (`/.well-known/openid-configuration` + JWKS). En local escucha en **http://localhost:8080** (el mismo puerto que usaba Keycloak).
 
 ## Levantar todo
-`python scripts/dev-identity-secrets.py` (una vez) y despues `aspire run` (o `aspire start`): levanta Postgres, Redis, RabbitMQ, el servicio de identidad, la Wallet, los juegos, la API y el front.
+`aspire run` (o `aspire start`): levanta Postgres, Redis, RabbitMQ, el servicio de identidad, la Wallet, los juegos, la API y el front.
 
 ## Secretos que necesita el entorno local
 Ninguno se versiona. Se guardan con user-secrets:
@@ -20,7 +20,7 @@ Ninguno se versiona. Se guardan con user-secrets:
 | `Fairness:MasterKey` | `src/Casino.GamesService` | Clave maestra que cifra las server seeds (32 bytes en base64) |
 | `Parameters:google-client-id` / `google-client-secret` | `src/Casino.AppHost` | **Opcionales**: login con Google (ver abajo) |
 
-`python scripts/dev-identity-secrets.py` genera las dos primeras (sin pisarlas si ya existen). La de las seeds:
+Las dos primeras **se generan solas** la primera vez que corre `aspire run` (el AppHost las guarda en los user-secrets de la maquina y nunca las pisa; `python scripts/dev-identity-secrets.py` hace lo mismo a mano). La de las seeds:
 
 ```
 dotnet user-secrets set "Fairness:MasterKey" "<32 bytes aleatorios en base64>" --project src/Casino.GamesService
