@@ -9,10 +9,9 @@ const fully = { ratio: 0.99 };
 
 async function login(page: Page) {
   await page.goto("/");
-  await page.getByRole("button", { name: /Entrar o crear cuenta/ }).click();
-  await page.locator("#username").fill(USER);
-  await page.locator("#password").fill(PASSWORD);
-  await page.locator("#kc-login").click();
+  await page.getByLabel("Alias o email").fill(USER);
+  await page.getByLabel("Contraseña").fill(PASSWORD);
+  await page.getByRole("button", { name: "Entrar", exact: true }).click();
   await expect(page.getByRole("heading", { name: new RegExp(`Hola, ${USER}`) })).toBeVisible();
 }
 

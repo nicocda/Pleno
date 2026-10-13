@@ -11,10 +11,13 @@ import { AdminWithdrawals } from "./pages/AdminWithdrawals";
 import { Cashier } from "./pages/Cashier";
 import { Withdraw } from "./pages/Withdraw";
 import { Movements } from "./pages/Movements";
+import { AdminRoles } from "./pages/AdminRoles";
 import { AuthCallback } from "./pages/AuthCallback";
 import { History } from "./pages/History";
 import { Lobby } from "./pages/Lobby";
 import { NotFound } from "./pages/NotFound";
+import { RecoverPassword } from "./pages/RecoverPassword";
+import { VerifyEmail } from "./pages/VerifyEmail";
 
 /** Rutas. Los providers de sesion y tema viven en `main.tsx`; los datos del servidor, aca. */
 export function App() {
@@ -22,6 +25,8 @@ export function App() {
     <ApiProvider>
       <Routes>
         <Route path="/auth/callback" element={<AuthCallback />} />
+        <Route path="/verificar" element={<VerifyEmail />} />
+        <Route path="/recuperar" element={<RecoverPassword />} />
         <Route element={<RequireAuth />}>
           <Route index element={<Lobby />} />
           {/* Un juego = una pagina registrada (games/registry). Agregar o quitar uno no toca estas rutas. */}
@@ -33,6 +38,7 @@ export function App() {
           <Route path="admin/cargas" element={<AdminCredits />} />
           <Route path="admin/tragamonedas" element={<AdminSlots />} />
           <Route path="admin/jerarquia" element={<AdminHierarchy />} />
+          <Route path="admin/roles" element={<AdminRoles />} />
           <Route path="cajero" element={<Cashier />} />
           <Route path="retirar" element={<Withdraw />} />
           <Route path="admin/retiros" element={<AdminWithdrawals />} />
