@@ -23,15 +23,44 @@ internal sealed class SmtpEmailSender(IOptions<EmailOptions> options) : IEmailSe
     }
 }
 
-/// <summary>Solo desarrollo: escribe el correo en el log (asunto y cuerpo, nunca el destinatario) para poder seguir los enlaces a mano.</summary>
-internal sealed partial class LogEmailSender(ILogger<LogEmailSender> logger) : IEmailSender
+/// <summary>Los ultimos correos que "salieron" en desarrollo (sin SMTP). Solo en memoria: nunca van al log ni a la telemetria, porque traen enlaces con tokens.</summary>
+public sealed class DevMailbox
+{
+    private const int Capacity = 50;
+    private readonly Lock _lock = new();
+    private readonly List<EmailMessage> _messages = [];
+
+    public void Add(EmailMessage message)
+    {
+        lock (_lock)
+        {
+            _messages.Add(message);
+            if (_messages.Count > Capacity)
+            {
+                _messages.RemoveAt(0);
+            }
+        }
+    }
+
+    public IReadOnlyList<EmailMessage> Snapshot()
+    {
+        lock (_lock)
+        {
+            return [.. _messages];
+        }
+    }
+}
+
+/// <summary>Solo desarrollo: guarda el correo en <see cref="DevMailbox"/> (se lee en <c>GET /identity/dev/emails</c>) y en el log deja unicamente el asunto.</summary>
+internal sealed partial class DevEmailSender(DevMailbox mailbox, ILogger<DevEmailSender> logger) : IEmailSender
 {
     public Task SendAsync(EmailMessage message, CancellationToken ct)
     {
-        LogEmail(logger, message.Subject, message.Body);
+        mailbox.Add(message);
+        LogEmail(logger, message.Subject);
         return Task.CompletedTask;
     }
 
-    [LoggerMessage(Level = LogLevel.Information, Message = "[DEV] Correo '{Subject}': {Body}")]
-    private static partial void LogEmail(ILogger logger, string subject, string body);
+    [LoggerMessage(Level = LogLevel.Information, Message = "[DEV] Correo '{Subject}' guardado en GET /identity/dev/emails")]
+    private static partial void LogEmail(ILogger logger, string subject);
 }

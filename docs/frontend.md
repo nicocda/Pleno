@@ -5,7 +5,7 @@ React 19 + Vite + TypeScript. Decisiones y motivos: [ADR 0005](adr/0005-frontend
 ## Levantarlo
 Con todo el sistema (recomendado): `aspire start` levanta Postgres, RabbitMQ, Redis, el servicio de identidad, la API **y el front** en
 **http://localhost:5173**. Entrá con `jugador1` / `jugador1-dev` o `jugador2` / `jugador2-dev` (ver [autenticacion.md](autenticacion.md)),
-o creá una cuenta nueva desde la pantalla de entrada (alias, email y contraseña; en desarrollo el correo de verificación aparece en el log del servicio de identidad).
+o creá una cuenta nueva desde la pantalla de entrada (alias, email y contraseña; en desarrollo el correo de verificación se lee en `http://localhost:8080/identity/dev/emails`).
 
 Solo el front (necesita la API y el servicio de identidad ya corriendo):
 

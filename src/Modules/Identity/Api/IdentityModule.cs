@@ -150,6 +150,7 @@ public static class IdentityModule
         AccountEndpoints.Map(app);
         TokenEndpoint.Map(app);
         ExternalLoginEndpoints.Map(app);
+        DevEndpoints.Map(app);
         AdminEndpoints.Map(app);
         return app;
     }
@@ -179,7 +180,8 @@ public static class IdentityModule
         }
         else if (builder.Environment.IsDevelopment())
         {
-            builder.Services.AddSingleton<IEmailSender, LogEmailSender>();
+            builder.Services.AddSingleton<DevMailbox>();
+            builder.Services.AddSingleton<IEmailSender, DevEmailSender>();
         }
         else
         {
