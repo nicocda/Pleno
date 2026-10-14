@@ -6,6 +6,7 @@ const info = (id: string): GameInfo => ({ id, name: id, tagline: "", route: `/${
 describe("game registry", () => {
   it("has a page for the games that exist today, with unique ids and routes", () => {
     expect(pageFor("roulette")?.route).toBe("ruleta");
+    expect(pageFor("dice")?.route).toBe("dados");
     expect(pageFor("slots")?.route).toBe("tragamonedas");
     expect(pageFor("crash")?.route).toBe("crash");
     expect(pageFor("blackjack")?.route).toBe("blackjack");

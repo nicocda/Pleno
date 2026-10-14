@@ -784,3 +784,20 @@ export type TrucoActionType = "play" | "truco" | "retruco" | "vale4" | "envido" 
 
 /** La jugada propia de Truco: las cartas se juegan con `play`. */
 export type TrucoAction = { type: "play"; card: number } | { type: Exclude<TrucoActionType, "play"> };
+
+export type DiceDirection = "Under" | "Over";
+
+/** Una tirada de Dados. `chance` y `roll` van en centesimas (4950 = 49,50 %; 1234 = 12,34). */
+export interface DiceRound {
+  betId: string;
+  status: RoundStatus;
+  direction: DiceDirection;
+  chance: number;
+  stake: number;
+  pairId: string;
+  nonce: number;
+  roll: number | null;
+  payout: number | null;
+  failureReason: string | null;
+  placedAt: string;
+}

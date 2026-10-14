@@ -1,5 +1,6 @@
 using Casino.Modules.Games.Blackjack;
 using Casino.Modules.Games.Crash;
+using Casino.Modules.Games.Dice;
 using Casino.Modules.Games.Platform;
 using Casino.Modules.Games.Poker;
 using Casino.Modules.Games.Roulette;
@@ -15,5 +16,5 @@ namespace Casino.Hosts.Games;
 /// </summary>
 public static class AvailableGames
 {
-    public static IGameModule[] All() => [new RouletteGameModule(), new SlotsGameModule(), new CrashGameModule(), new BlackjackGameModule(), new UnoGameModule(), new TrucoGameModule(), new PokerGameModule()];
+    public static IGameModule[] All() => [new RouletteGameModule(), new DiceGameModule(), new SlotsGameModule(), new CrashGameModule(), new BlackjackGameModule(), new UnoGameModule(), new TrucoGameModule(), new PokerGameModule()];
 }
