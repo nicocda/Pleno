@@ -47,11 +47,13 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--api", default="http://localhost:5188")
     parser.add_argument("--identity", default="http://localhost:8080")
+    parser.add_argument("--password", default=None, help="contraseña de todos los usuarios de desarrollo (modo demo, docs/demo.md); sin ella se usan las publicas")
     parser.add_argument("--fichas", type=int, default=10_000, help="fichas que el backoffice le acredita al jefe (0 = ninguna)")
     args = parser.parse_args()
 
     tokens = {}
-    for name, password in DEV_USERS.items():
+    for name, default_password in DEV_USERS.items():
+        password = args.password or default_password
         status, body = request("POST", f"{args.identity}/connect/token",
                                form={"grant_type": "password", "client_id": "casino-web", "username": name, "password": password})
         if status != 200:

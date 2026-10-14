@@ -9,6 +9,8 @@ const port = Number(process.env.PORT ?? 5173);
 // unico punto de entrada. El navegador de otro dispositivo solo habla con este origen; Vite reenvia a la API y al servicio de identidad, que siguen
 // escuchando solo en localhost. HTTPS hace falta para que el navegador acepte las cookies seguras del login con Google.
 const lan = process.env.LAN_MODE === "true";
+// Con tunel (LAN_TUNNEL, ver docs/demo.md) el HTTPS lo pone el tunel: Vite sirve en HTTP y acepta el host del tunel.
+const tunnel = process.env.LAN_TUNNEL === "true";
 const apiTarget = process.env.API_TARGET ?? "http://localhost:5188";
 const identityTarget = process.env.IDENTITY_TARGET ?? "http://localhost:8080";
 
@@ -16,15 +18,21 @@ const lanProxy = {
   "/api": { target: apiTarget, changeOrigin: true, ws: true, rewrite: (path: string) => path.replace(/^\/api/, "") },
   // xfwd: el servicio de identidad (X-Forwarded-*) arma sus URLs con el protocolo y host que ve el navegador.
   "/connect": { target: identityTarget, changeOrigin: false, xfwd: true },
-  "/identity": { target: identityTarget, changeOrigin: false, xfwd: true },
+  // /identity/dev/* (el buzon de correos de desarrollo) NUNCA se expone: traeria los enlaces con tokens de cualquiera. Responde 404.
+  "/identity": {
+    target: identityTarget,
+    changeOrigin: false,
+    xfwd: true,
+    bypass: (req: { url?: string }) => (req.url?.startsWith("/identity/dev") ? "/__no-expuesto__" : undefined),
+  },
   "/signin-google": { target: identityTarget, changeOrigin: false, xfwd: true },
   "/.well-known": { target: identityTarget, changeOrigin: false, xfwd: true },
 };
 
 export default defineConfig({
-  plugins: [react(), ...(lan ? [basicSsl()] : [])],
+  plugins: [react(), ...(lan && !tunnel ? [basicSsl()] : [])],
   // host: true escucha en 0.0.0.0 para abrir el front desde otro dispositivo de la red local.
-  server: { host: true, port, strictPort: true, ...(lan ? { proxy: lanProxy } : {}) },
+  server: { host: true, port, strictPort: true, ...(tunnel ? { allowedHosts: [".devtunnels.ms"] } : {}), ...(lan ? { proxy: lanProxy } : {}) },
   preview: { port, strictPort: true },
   test: {
     environment: "jsdom",
