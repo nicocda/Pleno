@@ -898,3 +898,13 @@ button.tru-card--playable:hover { transform: translateY(-14px); }
 .perf-select { background: var(--surface); color: inherit; border: 1px solid var(--line); border-radius: 10px; padding: 6px 8px; }
 .admin-roles { display: flex; flex-wrap: wrap; gap: 4px 14px; }
 .admin-roles__option { display: inline-flex; align-items: center; gap: 6px; font-size: 0.9rem; }
+
+/* ---- Dados ---- */
+.dice-number { font-family: var(--font-display); font-size: clamp(3rem, 14vw, 5rem); font-weight: 800; text-align: center; font-variant-numeric: tabular-nums; line-height: 1.1; margin: 4px 0 8px; }
+.dice-number--rolling { opacity: 0.7; }
+.dice-number--win { color: var(--win); }
+.dice-number--loss { color: var(--muted); }
+.dice-chance { display: grid; gap: 6px; margin: 14px 0 4px; }
+.dice-chance input[type="range"] { width: 100%; accent-color: var(--gold); }
+.dice-chip { padding: 2px 8px; border-radius: 999px; border: 1px solid var(--line); font-variant-numeric: tabular-nums; color: var(--muted); }
+.dice-chip--win { color: var(--win); border-color: var(--win); }

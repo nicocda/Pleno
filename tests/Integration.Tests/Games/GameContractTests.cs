@@ -50,13 +50,14 @@ public sealed class GameContractTests(PostgresFixture db, RabbitMqFixture rabbit
         var catalog = await player.GetFromJsonAsync<JsonElement>("/games");
 
         var cards = catalog.EnumerateArray().ToDictionary(c => c.GetProperty("id").GetString()!);
-        Assert.Equal(["blackjack", "crash", "poker", "roulette", "slots", "truco", "uno"], cards.Keys.Order());
+        Assert.Equal(["blackjack", "crash", "dice", "poker", "roulette", "slots", "truco", "uno"], cards.Keys.Order());
         Assert.Equal("/poker", cards["poker"].GetProperty("route").GetString());
         Assert.Equal("/truco", cards["truco"].GetProperty("route").GetString());
         Assert.Equal("/uno", cards["uno"].GetProperty("route").GetString());
         Assert.Equal("/blackjack", cards["blackjack"].GetProperty("route").GetString());
         Assert.Equal("/crash", cards["crash"].GetProperty("route").GetString());
         Assert.Equal("/ruleta", cards["roulette"].GetProperty("route").GetString());
+        Assert.Equal("/dados", cards["dice"].GetProperty("route").GetString());
         Assert.Equal("/tragamonedas", cards["slots"].GetProperty("route").GetString());
         Assert.All(cards.Values, c =>
         {

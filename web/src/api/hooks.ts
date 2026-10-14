@@ -1,7 +1,7 @@
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useApi, useIdentityApi } from "./ApiProvider";
 import { ApiError } from "./client";
-import type { Account, Withdrawal, LoadChipsResult, CashierMe, CashierTransfer, HierarchyLevel, HierarchyNode, JurisdictionMember, CreateTableBody, TableCreated, TableQuoteResult, TableRules, TableState, TableSummary, BlackjackBet, BlackjackTable, BlackjackTableState, CrashBet, CrashCashOut, CrashState, GameInfo, SlotsSettings, SlotsSettingsBody, SlotsSettingsHistoryItem, SlotsSettingsPreview, CreditFilter, CreditHistory, MovementsPage, AuditEntry, CreditResult, FairnessInfo, Me, Paytable, PlaceBetBody, PlacedBet, IdentityUser, Round, Spin, UserSummary } from "./types";
+import type { Account, Withdrawal, LoadChipsResult, CashierMe, CashierTransfer, HierarchyLevel, HierarchyNode, JurisdictionMember, CreateTableBody, TableCreated, TableQuoteResult, TableRules, TableState, TableSummary, BlackjackBet, BlackjackTable, BlackjackTableState, CrashBet, CrashCashOut, CrashState, GameInfo, SlotsSettings, SlotsSettingsBody, SlotsSettingsHistoryItem, SlotsSettingsPreview, CreditFilter, CreditHistory, MovementsPage, AuditEntry, CreditResult, FairnessInfo, Me, Paytable, PlaceBetBody, PlacedBet, IdentityUser, Round, DiceDirection, DiceRound, Spin, UserSummary } from "./types";
 
 export const queryKeys = {
   spinsAll: ["spins"] as const,
@@ -101,6 +101,33 @@ export function useRound(betId: string | null) {
   return useQuery({
     queryKey: ["round", betId],
     queryFn: () => api.get<Round>(`/games/roulette/rounds/${betId}`),
+    enabled: betId !== null,
+    refetchInterval: (query) => {
+      const status = query.state.data?.status;
+      return status === "Settled" || status === "Rejected" || status === "Voided" ? false : 3_000;
+    },
+  });
+}
+
+export function useDiceRounds(limit = 20) {
+  const api = useApi();
+  return useQuery({ queryKey: ["dice", "rounds", limit], queryFn: () => api.get<DiceRound[]>(`/games/dice/rounds?limit=${limit}`) });
+}
+
+export function usePlaceDice() {
+  const api = useApi();
+  return useMutation({
+    mutationFn: ({ direction, chance, stake, idempotencyKey }: { direction: DiceDirection; chance: number; stake: number; idempotencyKey: string }) =>
+      api.post<PlacedBet>("/games/dice/bets", { direction, chance, stake }, { "Idempotency-Key": idempotencyKey }),
+  });
+}
+
+/** Una tirada de Dados. Se consulta cada 3 s hasta que cierre: es el respaldo por si se pierde el aviso en vivo. */
+export function useDiceRound(betId: string | null) {
+  const api = useApi();
+  return useQuery({
+    queryKey: ["dice", "round", betId],
+    queryFn: () => api.get<DiceRound>(`/games/dice/rounds/${betId}`),
     enabled: betId !== null,
     refetchInterval: (query) => {
       const status = query.state.data?.status;

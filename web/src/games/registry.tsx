@@ -18,6 +18,7 @@ export interface GamePage {
 // PixiJS pesa bastante: cada pagina se descarga recien cuando el jugador entra a ella.
 export const GAME_PAGES: readonly GamePage[] = [
   { id: "roulette", route: "ruleta", component: lazy(() => import("../pages/Roulette").then((m) => ({ default: m.Roulette }))) },
+  { id: "dice", route: "dados", component: lazy(() => import("../pages/Dice").then((m) => ({ default: m.Dice }))) },
   { id: "slots", route: "tragamonedas", component: lazy(() => import("../pages/Slots").then((m) => ({ default: m.Slots }))) },
   { id: "crash", route: "crash", component: lazy(() => import("../pages/Crash").then((m) => ({ default: m.Crash }))) },
   { id: "blackjack", route: "blackjack", component: lazy(() => import("../pages/Blackjack").then((m) => ({ default: m.Blackjack }))) },

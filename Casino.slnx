@@ -14,6 +14,9 @@
   <Folder Name="/src/Modules/Games/">
     <Project Path="src/Modules/Games/Casino.Modules.Games.csproj" />
   </Folder>
+  <Folder Name="/src/Modules/Games.Dice/">
+    <Project Path="src/Modules/Games.Dice/Casino.Modules.Games.Dice.csproj" />
+  </Folder>
   <Folder Name="/src/Modules/Games.Roulette/">
     <Project Path="src/Modules/Games.Roulette/Casino.Modules.Games.Roulette.csproj" />
   </Folder>

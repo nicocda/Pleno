@@ -12,6 +12,7 @@
     <ProjectReference Include="..\Casino.Hosting\Casino.Hosting.csproj" />
     <ProjectReference Include="..\Modules\Games\Casino.Modules.Games.csproj" />
     <ProjectReference Include="..\Modules\Games.Roulette\Casino.Modules.Games.Roulette.csproj" />
+    <ProjectReference Include="..\Modules\Games.Dice\Casino.Modules.Games.Dice.csproj" />
     <ProjectReference Include="..\Modules\Games.Slots\Casino.Modules.Games.Slots.csproj" />
     <ProjectReference Include="..\Modules\Games.Crash\Casino.Modules.Games.Crash.csproj" />
     <ProjectReference Include="..\Modules\Games.Blackjack\Casino.Modules.Games.Blackjack.csproj" />
