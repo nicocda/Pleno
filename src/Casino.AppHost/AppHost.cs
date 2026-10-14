@@ -1,5 +1,9 @@
 var builder = DistributedApplication.CreateBuilder(args);
 
+// Claves de desarrollo del servicio de identidad (cifrado y hash del email): si faltan se generan y se guardan solas en los user-secrets de esta maquina.
+Casino.AppHost.DevSecrets.EnsureKey(builder, "Parameters:identity-email-key");
+Casino.AppHost.DevSecrets.EnsureKey(builder, "Parameters:identity-email-hmac-key");
+
 // Infraestructura con NOMBRES FIJOS y contenedores persistentes: siempre es el mismo contenedor (casino-postgres, casino-redis...) y los mismos volumenes,
 // sin importar desde que carpeta o worktree se corra Aspire. Antes cada ejecucion creaba contenedores nuevos con sufijo aleatorio y cada ruta de AppHost
 // (cada worktree) sus propios volumenes. Persistente = sigue corriendo al cerrar Aspire (se reutiliza en la proxima corrida, arranca al instante):

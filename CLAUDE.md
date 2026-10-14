@@ -19,7 +19,7 @@ Laboratorio de arquitectura distribuida en .NET. Ver `README.md` y `docs/PLAN.md
 - Toda operacion que mueve fichas lleva `IdempotencyKey`.
 - **Identidad:** servicio propio con ASP.NET Core Identity + OpenIddict (ver `docs/autenticacion.md` y ADR 0017). La identidad sale del token, nunca del cuerpo; las cuentas se derivan del usuario con `PlayerIds`. Del jugador solo se guarda alias y email (cifrado + HMAC), nunca en claro.
 - **Clave maestra del RNG** (`Fairness:MasterKey`): user-secrets en local (`dotnet user-secrets set ... --project src/Casino.GamesService`), Key Vault en la nube.
-- **Claves de identidad** (cifrado y HMAC del email, firma de tokens, Google, SMTP): user-secrets en local (`python scripts/dev-identity-secrets.py`), Key Vault o `.env` con permisos 600 en el servidor. Perder la clave de cifrado del email deja ilegibles los emails guardados.
+- **Claves de identidad** (cifrado y HMAC del email, firma de tokens, Google, SMTP): user-secrets en local (se generan solas con `aspire run`), Key Vault o `.env` con permisos 600 en el servidor. Perder la clave de cifrado del email deja ilegibles los emails guardados.
 - **Nada de secretos** en codigo, `appsettings.json`, `.env` versionados ni pipelines: user-secrets en local, Key Vault en la nube.
 - PII (email, nombre, documento) enmascarada en logs y fuera de trazas/metricas. Datos de prueba solo con Bogus.
 - Tests obligatorios para todo lo que toque la Wallet (unitarios + integracion con Testcontainers).
