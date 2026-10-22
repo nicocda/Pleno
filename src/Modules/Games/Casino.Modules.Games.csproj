@@ -8,8 +8,8 @@
 
   <ItemGroup>
     <FrameworkReference Include="Microsoft.AspNetCore.App" />
-    <PackageReference Include="Marten" Version="9.49.0" />
-    <PackageReference Include="WolverineFx.Marten" Version="6.49.0" />
+    <PackageReference Include="Marten" Version="9.51.0" />
+    <PackageReference Include="WolverineFx.Marten" Version="6.51.2" />
   </ItemGroup>
 
   <ItemGroup>
