@@ -11,10 +11,11 @@
   </ItemGroup>
 
   <ItemGroup>
-    <PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="10.0.12" />
-    <PackageReference Include="WolverineFx.Marten" Version="6.49.0" />
-    <PackageReference Include="WolverineFx.RabbitMQ" Version="6.49.0" />
-    <PackageReference Include="WolverineFx.RuntimeCompilation" Version="6.49.0" />
+    <PackageReference Include="Marten" Version="9.55.0" />
+    <PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="10.0.14" />
+    <PackageReference Include="WolverineFx.Marten" Version="6.57.0" />
+    <PackageReference Include="WolverineFx.RabbitMQ" Version="6.57.0" />
+    <PackageReference Include="WolverineFx.RuntimeCompilation" Version="6.57.0" />
   </ItemGroup>
 
   <ItemGroup>
