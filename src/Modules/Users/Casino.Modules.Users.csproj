@@ -7,9 +7,9 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="WolverineFx.Marten" Version="6.49.0" />
+    <PackageReference Include="WolverineFx.Marten" Version="6.57.0" />
     <FrameworkReference Include="Microsoft.AspNetCore.App" />
-    <PackageReference Include="Marten" Version="9.49.0" />
+    <PackageReference Include="Marten" Version="9.55.0" />
   </ItemGroup>
 
   <ItemGroup>
