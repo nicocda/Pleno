@@ -47,6 +47,13 @@ var identity = builder.AddProject<Projects.Casino_IdentityService>("identity")
     .WithEnvironment("Identity__Email__HmacKey", builder.AddParameter("identity-email-hmac-key", secret: true));
 // Iniciar sesion con Google (opcional). Las credenciales de la app OAuth de Google son secretos: solo user-secrets en local y Key Vault en la nube.
 // Sin ellas el boton de Google no aparece y todo sigue igual. Ver docs/autenticacion.md.
+// `aspire start` lanza el AppHost sin perfil de lanzamiento (sin ASPNETCORE_ENVIRONMENT) y el servicio quedaria como produccion: exigiria SMTP
+// y no sembraria los usuarios de desarrollo. En modo local (no en `aspire publish`) se fuerza Development.
+if (builder.ExecutionContext.IsRunMode)
+{
+    identity.WithEnvironment("ASPNETCORE_ENVIRONMENT", "Development").WithEnvironment("DOTNET_ENVIRONMENT", "Development");
+}
+
 //   dotnet user-secrets set "Parameters:google-client-id" <valor> --project src/Casino.AppHost
 //   dotnet user-secrets set "Parameters:google-client-secret" <valor> --project src/Casino.AppHost
 if (!string.IsNullOrWhiteSpace(builder.Configuration["Parameters:google-client-id"]) && !string.IsNullOrWhiteSpace(builder.Configuration["Parameters:google-client-secret"]))
